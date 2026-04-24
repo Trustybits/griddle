@@ -1,0 +1,26 @@
+{
+  "name": "@griddle/vue",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": ["src"],
+  "scripts": {
+    "build": "echo 'Vue adapter is distributed as source (consumed by SFC compiler in user project).'"
+  },
+  "peerDependencies": {
+    "vue": "^3.3.0",
+    "@griddle/core": "*"
+  },
+  "devDependencies": {
+    "vue": "^3.4.0",
+    "@griddle/core": "*"
+  }
+}

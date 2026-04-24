@@ -1,0 +1,19 @@
+{
+  "name": "griddle-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Zero-dependency grid/canvas system — headless core + React/Vue/Svelte adapters.",
+  "workspaces": [
+    "packages/*",
+    "demos/*"
+  ],
+  "scripts": {
+    "build:core": "cd packages/core && npm run build",
+    "build:adapters": "npm run build --workspace @griddle/react --workspace @griddle/vue --workspace @griddle/svelte",
+    "build": "npm run build:core && npm run build:adapters",
+    "test": "node packages/core/test/run.mjs",
+    "demo:react": "cd demos/react && npm run dev",
+    "demo:vue": "cd demos/vue && npm run dev",
+    "demo:svelte": "cd demos/svelte && npm run dev"
+  }
+}

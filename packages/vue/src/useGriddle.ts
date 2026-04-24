@@ -1,0 +1,47 @@
+// Vue composable that wraps a Grid instance with reactive state.
+
+import { onBeforeUnmount, reactive, ref, shallowRef } from 'vue';
+import { Grid } from '@griddle/core';
+import type { GridConfig, Tile, GridSnapshot } from '@griddle/core';
+
+export interface UseGriddleInit {
+  config: GridConfig;
+  tiles?: Tile[];
+}
+
+export function useGriddle(init: UseGriddleInit) {
+  const grid = new Grid(init.config, init.tiles ?? []);
+
+  // Reactive mirrors of tiles and config. We re-assign on changes.
+  const tiles = shallowRef<Tile[]>(grid.tiles);
+  const config = shallowRef<GridConfig>(grid.config);
+  const version = ref(0);
+
+  const off = grid.changes.on(() => {
+    tiles.value = grid.tiles;
+    config.value = grid.config;
+    version.value++;
+  });
+  onBeforeUnmount(off);
+
+  const api = {
+    grid,
+    tiles,
+    config,
+    version,
+    moveTile: (id: string, target: { col: number; row: number }) => grid.moveTile(id, target),
+    resizeTile: (id: string, size: { w: number; h: number }) => grid.resizeTile(id, size),
+    addTile: (t: Tile) => grid.addTile(t),
+    removeTile: (id: string) => grid.removeTile(id),
+    updateConfig: (patch: Partial<GridConfig>) => grid.updateConfig(patch),
+    toJSON: () => grid.toJSON(),
+    loadJSON: (snap: GridSnapshot) => {
+      grid.restoreTiles(new Map());
+      grid.updateConfig(snap.config);
+      for (const t of snap.tiles) grid.addTile(t);
+    },
+  };
+  return api;
+}
+
+export type GriddleApi = ReturnType<typeof useGriddle>;

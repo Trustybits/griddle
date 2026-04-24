@@ -1,0 +1,42 @@
+// Virtualization helpers. Given a viewport (px) and scroll offset (px), compute
+// the range of cells that are visible plus a buffer. The adapters use this to
+// decide which tiles to actually render.
+import { rectsOverlap } from './geometry.js';
+/** Compute the visible cell rect for a given viewport, padded by `buffer` cells. */
+export function visibleRange(config, vp, buffer = 2) {
+    const colSize = config.unitWidth + (config.gap ?? 0);
+    const rowSize = config.unitHeight + (config.gap ?? 0);
+    const col0 = Math.max(0, Math.floor(vp.scrollX / colSize) - buffer);
+    const row0 = Math.max(0, Math.floor(vp.scrollY / rowSize) - buffer);
+    const col1 = Math.ceil((vp.scrollX + vp.width) / colSize) + buffer;
+    const row1 = Math.ceil((vp.scrollY + vp.height) / rowSize) + buffer;
+    const maxCol = config.infiniteX || config.cols === Infinity ? col1 : Math.min(col1, config.cols);
+    const maxRow = config.infiniteY || config.rows === Infinity ? row1 : Math.min(row1, config.rows);
+    return {
+        col: col0,
+        row: row0,
+        w: Math.max(0, maxCol - col0),
+        h: Math.max(0, maxRow - row0),
+    };
+}
+/** Filter tiles to only those overlapping the visible range. */
+export function visibleTiles(tiles, range) {
+    return tiles.filter((t) => rectsOverlap({ col: t.col, row: t.row, w: t.w, h: t.h }, range));
+}
+/** Compute the total pixel size of the grid content (for scroll container sizing). */
+export function gridContentSize(config, tiles) {
+    const gap = config.gap ?? 0;
+    const colSize = config.unitWidth + gap;
+    const rowSize = config.unitHeight + gap;
+    let maxCol = config.infiniteX || config.cols === Infinity ? 0 : config.cols;
+    let maxRow = config.infiniteY || config.rows === Infinity ? 0 : config.rows;
+    for (const t of tiles) {
+        maxCol = Math.max(maxCol, t.col + t.w + 2);
+        maxRow = Math.max(maxRow, t.row + t.h + 2);
+    }
+    return {
+        width: maxCol * colSize,
+        height: maxRow * rowSize,
+    };
+}
+//# sourceMappingURL=virtualize.js.map
