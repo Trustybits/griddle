@@ -13,6 +13,9 @@
     }
   },
   "files": ["src"],
+  "scripts": {
+    "build": "echo 'Svelte adapter is distributed as source (consumed by SFC compiler in user project).'"
+  },
   "peerDependencies": {
     "svelte": "^4.0.0 || ^5.0.0",
     "@griddle/core": "*"
