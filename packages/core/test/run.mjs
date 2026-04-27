@@ -194,6 +194,39 @@ test('Rule 3-5: large dragger displaces small partially-overlapping victim', () 
   eq(b.row, 7);
 });
 
+test('Rule 3-5: two stacked victims displaced by 2x2 dragger do not collide', () => {
+  // 2x2 dragger lands on (0,0). Two 1x1 victims A, B occupy column 0 rows 0-1.
+  // After displacement they must NOT both land on the same cell — earlier the
+  // engine ignored already-placed victims when checking the next one, causing
+  // A and B to overlap (rendered as B "only moving 1 unit" because two tiles
+  // collapsed onto the same cell).
+  const g = new Grid({ cols: 12, rows: 12, unitWidth: 50, unitHeight: 50 });
+  g.addTile({ id: 'A', col: 0, row: 0, w: 1, h: 1 });
+  g.addTile({ id: 'B', col: 0, row: 1, w: 1, h: 1 });
+  g.addTile({ id: 'D', col: 5, row: 5, w: 2, h: 2 });
+  const ok = g.moveTile('D', { col: 0, row: 0 });
+  assert(ok, 'move should succeed');
+  const A = g.getTile('A');
+  const B = g.getTile('B');
+  // Both should be displaced clear of the 2x2 dragger; they must not be at
+  // identical positions.
+  assert(!(A.col === B.col && A.row === B.row),
+    `A at ${A.col},${A.row} must not equal B at ${B.col},${B.row}`);
+});
+
+test('Rule 3-5: row of victims displaced east by 2x2 dragger do not collide', () => {
+  const g = new Grid({ cols: 12, rows: 12, unitWidth: 50, unitHeight: 50 });
+  g.addTile({ id: 'A', col: 0, row: 0, w: 1, h: 1 });
+  g.addTile({ id: 'B', col: 1, row: 0, w: 1, h: 1 });
+  g.addTile({ id: 'D', col: 5, row: 5, w: 2, h: 2 });
+  const ok = g.moveTile('D', { col: 0, row: 0 });
+  assert(ok, 'move should succeed');
+  const A = g.getTile('A');
+  const B = g.getTile('B');
+  assert(!(A.col === B.col && A.row === B.row),
+    `A at ${A.col},${A.row} must not equal B at ${B.col},${B.row}`);
+});
+
 // ---- Rule 6 -----------------------------------------------------------
 
 test('Rule 6: infinite axis push cascades tiles', () => {
@@ -257,15 +290,15 @@ test('Compaction: tiles stack toward gravity', () => {
   eq(g.getTile('b').row, 1);
 });
 
+// ---- Serialization --
 // ---- Serialization ----------------------------------------------------
 
 test('toJSON / fromJSON roundtrip', () => {
   const g = new Grid({ cols: 10, rows: 10, unitWidth: 50, unitHeight: 50, gravity: 'top' });
-  g.addTile({ id: 'a', col: 0, row: 0, w: 2, h: 1, data: { label: 'hello' } });
-  g.addTile({ id: 'b', col: 2, row: 0, w: 1, h: 2 });
+  g.addTile({ id: 'a', col: 0, row: 0, w: 2, h: 2, data: { label: 'hello' } });
+  g.addTile({ id: 'b', col: 5, row: 5, w: 1, h: 1 });
   const snap = g.toJSON();
-  const s = JSON.stringify(snap);
-  const g2 = Grid.fromJSON(JSON.parse(s));
+  const g2 = Grid.fromJSON(JSON.parse(JSON.stringify(snap)));
   eq(g2.tiles.length, 2);
   eq(g2.getTile('a').w, 2);
   deepEq(g2.getTile('a').data, { label: 'hello' });

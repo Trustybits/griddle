@@ -275,24 +275,3 @@ export class Grid {
     return g;
   }
 }
-  }
-
-  // ---- serialization ----------------------------------------------------
-
-  toJSON(): GridSnapshot {
-    return {
-      version: 1,
-      config: { ...this.config },
-      tiles: this.tiles.map((t) => ({ ...t })),
-    };
-  }
-
-  static fromJSON(snap: GridSnapshot): Grid {
-    if (snap.version !== 1) {
-      throw new Error(`Griddle: unsupported snapshot version ${snap.version}`);
-    }
-    const g = new Grid(snap.config, snap.tiles);
-    g.changes.emit({ type: 'load', tileIds: g.tiles.map((t) => t.id) });
-    return g;
-  }
-}

@@ -1,4 +1,22 @@
 // Movement engine — implements Rules 1-6 of the drag/drop spec.
+//
+// The engine mutates the grid in place during attempts but takes a snapshot at
+// each rule boundary so it can roll back on failure. If every rule rejects the
+// move (and the BFS fallback can't repack), the original grid is restored and
+// moveTile returns false.
+//
+// Rule overview:
+//   1. Empty target          — drop straight in.
+//   2. Same-footprint swap   — adjacent partner with identical w×h: swap them.
+//   3-5. Single-step displace — push each overlapping victim by enough cells
+//        along a priority direction to clear the dragger's full footprint.
+//        Each victim is placed independently; if any victim has no legal slot
+//        the rule rejects and we fall through.
+//   6. Cascade push          — push the victim AND any blockers it runs into
+//        along a priority direction. On infinite axes this loops until the
+//        target rect is clear (tiles slide off into space). On fixed grids,
+//        the cascade may run out of room — the move falls through to the 0-1
+//        BFS repack solver as a last resort.
 
 import type { CellPos, CellRect, Direction8, Tile } from './types.js';
 import type { Grid } from './grid.js';
@@ -14,9 +32,19 @@ import {
 import { solvePushBFS } from './repack.js';
 
 export interface MoveOptions {
+  /**
+   * Use this rect as the "origin" when computing priority directions, instead of
+   * the tile's actual current position. Used by resize, where the resized rect
+   * acts as the origin so neighbors are pushed away from the grown footprint.
+   */
   forceFromRect?: CellRect;
 }
 
+/**
+ * Attempt to move `tileId` to `target`. On success, the grid is mutated in
+ * place and `true` is returned. On failure, the grid is left unchanged and
+ * `false` is returned.
+ */
 export function moveTile(
   grid: Grid,
   tileId: string,
@@ -53,16 +81,23 @@ export function moveTile(
     return true;
   }
 
-  // Rule 3-5: try independent single-displacement of each overlapper
+  // Rule 3-5: try independent single-displacement of each overlapper.
+  //
+  // Each victim is placed in turn against the live grid. The ONLY tile we
+  // ignore when checking for collisions is the dragger itself — it still
+  // sits at originRect at this point and shouldn't block the displacement
+  // search. Any victim already moved into its new slot DOES block the next
+  // victim's candidate; otherwise two displaced tiles can land on the same
+  // cell (visible to the user as one tile "only moving 1 unit" because the
+  // overlap collapses two tiles into the same rendered position).
   const snapshot = grid.snapshotTiles();
   const dirs = priorityDirections(originRect, targetRect);
+  const draggerOnly: ReadonlySet<string> = new Set([tileId]);
 
-  const displaced = new Set<string>([tileId]);
   let allPlaced = true;
   for (const victim of overlap) {
-    const moved = tryDisplaceVictim(grid, victim.id, dirs, targetRect, displaced);
+    const moved = tryDisplaceVictim(grid, victim.id, dirs, targetRect, draggerOnly);
     if (!moved) { allPlaced = false; break; }
-    displaced.add(victim.id);
   }
 
   if (allPlaced) {
@@ -275,6 +310,14 @@ function cascadePushOverlap(
   return true;
 }
 
+/**
+ * Infinite-axis push chain. While anything overlaps `target`, shove every
+ * overlapper one cell along `dir`; any tile a shoved tile then collides with
+ * gets queued and shoved on the same pass. The grid grows infinitely along
+ * `dir`, so this always terminates with a clear target — though it may slide
+ * tiles arbitrarily far. Caller restores the snapshot on failure (e.g. if the
+ * safety limit trips).
+ */
 function pushChainInfinite(
   grid: Grid,
   tileId: string,
