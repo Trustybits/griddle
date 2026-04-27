@@ -15,5 +15,8 @@ export default defineConfig({
       '@griddle/svelte': resolve(__dirname, '../../packages/svelte/src/index.ts'),
     },
   },
+  // Don't pre-bundle our workspace packages — read them straight from source
+  // through the alias so edits to packages/core/src/* take effect immediately.
+  optimizeDeps: { exclude: ['@griddle/core', '@griddle/svelte'] },
   server: { port: 5175, open: true },
 });

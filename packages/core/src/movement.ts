@@ -1,8 +1,4 @@
 // Movement engine — implements Rules 1-6 of the drag/drop spec.
-//
-// The engine works on a copy-on-write "virtual grid" built from the parent Grid.
-// If the engine succeeds, the virtual state is committed back onto the real grid.
-// If it fails, nothing is committed.
 
 import type { CellPos, CellRect, Direction8, Tile } from './types.js';
 import type { Grid } from './grid.js';
@@ -18,17 +14,9 @@ import {
 import { solvePushBFS } from './repack.js';
 
 export interface MoveOptions {
-  /**
-   * Use this rect as the "origin" when computing priorities, instead of the tile's
-   * actual origin. Used during resize to push out neighbors from the resized rect.
-   */
   forceFromRect?: CellRect;
 }
 
-/**
- * Attempt to move `tileId` to `target` position. Mutates `grid` in place on success.
- * Returns true on success, false on rejection.
- */
 export function moveTile(
   grid: Grid,
   tileId: string,
@@ -65,19 +53,15 @@ export function moveTile(
     return true;
   }
 
-  // Rule 3-5: try to displace each overlapper via priority directions (face then corner)
-  //   (each overlapper independently — the dragging tile's rect is the priority origin)
+  // Rule 3-5: try independent single-displacement of each overlapper
   const snapshot = grid.snapshotTiles();
   const dirs = priorityDirections(originRect, targetRect);
 
   const displaced = new Set<string>([tileId]);
   let allPlaced = true;
   for (const victim of overlap) {
-    const moved = tryDisplaceOneCell(grid, victim.id, dirs, originRect, displaced);
-    if (!moved) {
-      allPlaced = false;
-      break;
-    }
+    const moved = tryDisplaceVictim(grid, victim.id, dirs, targetRect, displaced);
+    if (!moved) { allPlaced = false; break; }
     displaced.add(victim.id);
   }
 
@@ -86,23 +70,26 @@ export function moveTile(
     return true;
   }
 
-  // Rule 3-5 failed — restore and try Rule 6
   grid.restoreTiles(snapshot);
 
-  // Rule 6: push chain
+  // Rule 6: try cascading push along each priority direction.
+  // First: if the primary direction is on an infinite axis, use unbounded chain push.
+  // Otherwise: try minimum-clearance cascade push along each priority direction in turn.
   const primaryDir = faceClosestToOrigin(originRect, targetRect);
-  const infiniteDir = isInfiniteDirection(grid, primaryDir);
+  if (isInfiniteDirection(grid, primaryDir)) {
+    if (pushChainInfinite(grid, tileId, target, primaryDir)) return true;
+    grid.restoreTiles(snapshot);
+  }
 
-  if (infiniteDir) {
-    // Cascade: while any overlap, shift every overlapping tile by primaryDir and recurse.
-    if (pushChainInfinite(grid, tileId, target, primaryDir)) {
+  for (const dir of dirs) {
+    if (cascadePushOverlap(grid, tileId, targetRect, dir)) {
+      grid._setTilePos(tileId, target);
       return true;
     }
     grid.restoreTiles(snapshot);
-    return false;
   }
 
-  // Fixed grid — 0-1 BFS fallback
+  // Final fallback: 0-1 BFS on fixed grid.
   const solved = solvePushBFS(grid, tileId, target, originRect);
   if (!solved) {
     grid.restoreTiles(snapshot);
@@ -111,12 +98,16 @@ export function moveTile(
   return true;
 }
 
-/** Try to move `victimId` one cell in any of the priority directions. */
-function tryDisplaceOneCell(
+/**
+ * Displace `victimId` by the minimum cell count along one of `priorityDirs`
+ * such that it no longer overlaps `targetRect`, stays in bounds, and lands clear.
+ * Cardinal: clear on the moving axis. Diagonal: min(kxClear, kyClear) cells.
+ */
+function tryDisplaceVictim(
   grid: Grid,
   victimId: string,
   priorityDirs: Direction8[],
-  originRect: CellRect,
+  targetRect: CellRect,
   ignore: ReadonlySet<string>,
 ): boolean {
   const victim = grid.getTile(victimId);
@@ -125,14 +116,35 @@ function tryDisplaceOneCell(
 
   for (const dir of priorityDirs) {
     const { dx, dy } = directionStep(dir);
+
+    let kxClear = Infinity;
+    if (dx > 0) {
+      kxClear = Math.max(1, targetRect.col + targetRect.w - victimRect.col);
+    } else if (dx < 0) {
+      kxClear = Math.max(1, victimRect.col + victimRect.w - targetRect.col);
+    }
+    let kyClear = Infinity;
+    if (dy > 0) {
+      kyClear = Math.max(1, targetRect.row + targetRect.h - victimRect.row);
+    } else if (dy < 0) {
+      kyClear = Math.max(1, victimRect.row + victimRect.h - targetRect.row);
+    }
+
+    let k: number;
+    if (dx === 0 && dy === 0) continue;
+    else if (dx === 0) k = kyClear;
+    else if (dy === 0) k = kxClear;
+    else k = Math.min(kxClear, kyClear);
+
+    if (!isFinite(k)) continue;
+
     const candidate: CellRect = {
-      col: victimRect.col + dx,
-      row: victimRect.row + dy,
+      col: victimRect.col + k * dx,
+      row: victimRect.row + k * dy,
       w: victim.w,
       h: victim.h,
     };
     if (!grid.rectInBounds(candidate)) continue;
-    // cell must be empty (ignoring self and the dragging tile)
     const blockIds = new Set(ignore);
     blockIds.add(victimId);
     const hits = grid.tilesIn(candidate, blockIds);
@@ -141,31 +153,128 @@ function tryDisplaceOneCell(
       return true;
     }
   }
-  // Also consider: the priority direction may point AWAY from where the origin IS;
-  // but per spec, we already encode that. Move silently to try "leave origin" direction.
-  // (No-op here — spec only lists face/corner priorities, nothing further.)
-  _markUnused(originRect);
   return false;
-}
-
-function _markUnused(_r: CellRect): void {
-  // placeholder so linters don't flag unused param; keeps signature aligned
 }
 
 function isInfiniteDirection(grid: Grid, dir: Direction8): boolean {
   const { dx, dy } = directionStep(dir);
   if (dx !== 0 && !grid.config.infiniteX) return false;
   if (dy !== 0 && !grid.config.infiniteY) return false;
-  // At least one axis of motion must be on an infinite axis. For cardinal dirs this is simple:
   if (dx !== 0 && grid.config.infiniteX) return true;
   if (dy !== 0 && grid.config.infiniteY) return true;
   return false;
 }
 
 /**
- * On an infinite axis, push every overlapper one cell in `dir`, repeatedly, until the
- * target rect is free. A tile being pushed may in turn push others it collides with.
+ * Push every tile that overlaps `targetRect` by enough cells along `dir` to clear it,
+ * cascading through any tiles those pushes collide with. Aborts if any chained push
+ * would go out of bounds. Mutates the grid; caller restores on failure.
+ *
+ * For cardinal `dir`: each victim moves k = enough-to-clear cells.
+ * For diagonal `dir`: same logic — k = min cell count to clear via either axis.
  */
+function cascadePushOverlap(
+  grid: Grid,
+  draggerId: string,
+  targetRect: CellRect,
+  dir: Direction8,
+): boolean {
+  const { dx, dy } = directionStep(dir);
+  if (dx === 0 && dy === 0) return false;
+
+  const initialOverlap = grid.tilesIn(targetRect, new Set([draggerId]));
+  if (initialOverlap.length === 0) return true; // already clear
+
+  // Build the per-tile shift map. Each tile shifts by some multiple of (dx,dy).
+  // Start with the overlappers — each needs enough k to clear targetRect.
+  const shift = new Map<string, number>(); // tileId -> k cells along (dx,dy)
+  const queue: { id: string; k: number }[] = [];
+
+  function neededKForClearing(victim: Tile, blockRect: CellRect): number {
+    let kx = Infinity;
+    if (dx > 0) kx = Math.max(1, blockRect.col + blockRect.w - victim.col);
+    else if (dx < 0) kx = Math.max(1, victim.col + victim.w - blockRect.col);
+    let ky = Infinity;
+    if (dy > 0) ky = Math.max(1, blockRect.row + blockRect.h - victim.row);
+    else if (dy < 0) ky = Math.max(1, victim.row + victim.h - blockRect.row);
+    if (dx === 0) return ky;
+    if (dy === 0) return kx;
+    return Math.min(kx, ky);
+  }
+
+  for (const v of initialOverlap) {
+    const k = neededKForClearing(v, targetRect);
+    if (!isFinite(k)) return false;
+    shift.set(v.id, k);
+    queue.push({ id: v.id, k });
+  }
+
+  // Helper: where will tile `id` end up given current shift map?
+  function shiftedRect(t: Tile): CellRect {
+    const k = shift.get(t.id) ?? 0;
+    return { col: t.col + k * dx, row: t.row + k * dy, w: t.w, h: t.h };
+  }
+
+  const safety = 1000;
+  let iters = 0;
+  while (queue.length > 0) {
+    if (iters++ > safety) return false;
+    const { id } = queue.shift()!;
+    const tile = grid.getTile(id);
+    if (!tile) continue;
+    const newRect = shiftedRect(tile);
+    if (!grid.rectInBounds(newRect)) return false;
+    // Find any non-dragger tiles that this push collides with.
+    for (const other of grid.tiles) {
+      if (other.id === id || other.id === draggerId) continue;
+      const otherShifted = shiftedRect(other);
+      if (rectsOverlap(newRect, otherShifted)) {
+        // Need to push `other` further along dir to clear newRect.
+        const additional = neededKForClearing(other, newRect);
+        if (!isFinite(additional)) return false;
+        const prevK = shift.get(other.id) ?? 0;
+        // The other tile is currently shifted by prevK. After moving `tile` by k,
+        // other must be shifted relative to its CURRENT position by `additional` more.
+        // But neededKForClearing is computed against `other`'s ORIGINAL position…
+        // we need to use its currently-shifted position. Recompute:
+        const movedOther: Tile = {
+          ...other,
+          col: other.col + prevK * dx,
+          row: other.row + prevK * dy,
+        };
+        const extra = neededKForClearing(movedOther, newRect);
+        if (!isFinite(extra)) return false;
+        const newK = prevK + extra;
+        if (newK <= prevK) continue; // no progress, would loop
+        shift.set(other.id, newK);
+        queue.push({ id: other.id, k: newK });
+      }
+    }
+  }
+
+  // Validate all final positions in bounds and pairwise non-overlapping (against
+  // each other and against the dragger's targetRect — which now must be free).
+  const finalById = new Map<string, CellRect>();
+  for (const t of grid.tiles) {
+    if (t.id === draggerId) continue;
+    finalById.set(t.id, shiftedRect(t));
+  }
+  for (const [id, rect] of finalById) {
+    if (!grid.rectInBounds(rect)) return false;
+    if (rectsOverlap(rect, targetRect)) return false;
+    for (const [otherId, otherRect] of finalById) {
+      if (otherId === id) continue;
+      if (rectsOverlap(rect, otherRect)) return false;
+    }
+  }
+
+  // Commit.
+  for (const [id, rect] of finalById) {
+    grid._setTilePos(id, { col: rect.col, row: rect.row });
+  }
+  return true;
+}
+
 function pushChainInfinite(
   grid: Grid,
   tileId: string,
@@ -182,15 +291,13 @@ function pushChainInfinite(
   };
   const { dx, dy } = directionStep(dir);
 
-  const safety = 10_000; // guard against pathological infinite loops
+  const safety = 10_000;
   for (let iter = 0; iter < safety; iter++) {
     const overlap = grid.tilesIn(targetRect, new Set([tileId]));
     if (overlap.length === 0) {
       grid._setTilePos(tileId, target);
       return true;
     }
-    // Push each overlapper by (dx, dy). Cascading pushes may be needed — any tile the
-    // shoved tile now collides with must also be shoved. Loop until stable for this round.
     const queue: Tile[] = overlap.map((t) => ({ ...t }));
     while (queue.length > 0) {
       const victim = queue.shift()!;
@@ -203,7 +310,6 @@ function pushChainInfinite(
         h: cur.h,
       };
       grid._setTilePos(victim.id, { col: newRect.col, row: newRect.row });
-      // Anyone we now collide with (other than self, the dragging tile, or the target)?
       const collides = grid.tilesIn(newRect, new Set([victim.id, tileId]));
       for (const c of collides) {
         if (!queue.find((q) => q.id === c.id)) queue.push(c);
