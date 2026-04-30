@@ -1,8 +1,12 @@
 // GriddleGrid: the React rendering + interaction layer.
 // - Virtualized tile rendering (only visible tiles are mounted)
-// - Pointer-event drag with snap-during-drag preview
+// - Live-preview drag: as the cursor crosses cell boundaries the engine
+//   continuously rewinds and re-attempts the move, so victims animate into
+//   their new positions while the user is still dragging. The dragged tile
+//   itself follows the cursor freely (no snap); a separate drop indicator
+//   renders at the snapped candidate cell.
 // - Corner resize handles
-// - FLIP animations for repack
+// - FLIP animations for repack — skipped for the active dragger.
 
 import {
   CSSProperties,
@@ -16,7 +20,7 @@ import {
 } from 'react';
 import type { GriddleApi } from './useGriddle.js';
 import type { Corner, Tile } from '@griddle/core';
-import { visibleRange, visibleTiles, gridContentSize } from '@griddle/core';
+import { visibleRange, visibleTiles, gridContentSize, DragController } from '@griddle/core';
 import { useGridVersion } from './useGriddle.js';
 
 export interface GriddleGridProps {
@@ -30,14 +34,14 @@ export interface GriddleGridProps {
   showGrid?: boolean;
 }
 
-interface DragState {
+interface DragVisual {
   tileId: string;
-  startPointerX: number;
-  startPointerY: number;
-  startCol: number;
-  startRow: number;
-  previewCol: number;
-  previewRow: number;
+  pickupCol: number;
+  pickupRow: number;
+  deltaX: number;
+  deltaY: number;
+  indicatorCol: number | null;
+  indicatorRow: number | null;
 }
 
 interface ResizeState {
@@ -95,27 +99,35 @@ export function GriddleGrid(props: GriddleGridProps) {
   const colSize = config.unitWidth + (config.gap ?? 0);
   const rowSize = config.unitHeight + (config.gap ?? 0);
 
-  // Drag & resize state
-  const [drag, setDrag] = useState<DragState | null>(null);
+  // Drag controller (lives across drags) + ephemeral visual state
+  const dragControllerRef = useRef<DragController | null>(null);
+  if (!dragControllerRef.current) {
+    dragControllerRef.current = new DragController(api.grid);
+  }
+  const [drag, setDrag] = useState<DragVisual | null>(null);
   const [resize, setResize] = useState<ResizeState | null>(null);
-  const dragRef = useRef<DragState | null>(null);
+  const dragRef = useRef<DragVisual | null>(null);
   const resizeRef = useRef<ResizeState | null>(null);
   dragRef.current = drag;
   resizeRef.current = resize;
+  const dragStartPointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // FLIP animation state: previousRects by id
+  // FLIP animation state: previousRects by id. Skip the dragger during drag —
+  // it has its own cursor-driven inline transform.
   const prevRectsRef = useRef(new Map<string, { x: number; y: number; w: number; h: number }>());
   const tileNodes = useRef(new Map<string, HTMLDivElement>());
 
   useLayoutEffect(() => {
     const prev = prevRectsRef.current;
     const next = new Map<string, { x: number; y: number; w: number; h: number }>();
+    const draggerId = dragRef.current?.tileId ?? null;
     for (const t of tiles) {
       const x = t.col * colSize;
       const y = t.row * rowSize;
       const w = t.w * config.unitWidth + (t.w - 1) * (config.gap ?? 0);
       const h = t.h * config.unitHeight + (t.h - 1) * (config.gap ?? 0);
       next.set(t.id, { x, y, w, h });
+      if (t.id === draggerId) continue; // dragger handled by inline transform
       const p = prev.get(t.id);
       const node = tileNodes.current.get(t.id);
       if (p && node) {
@@ -124,7 +136,6 @@ export function GriddleGrid(props: GriddleGridProps) {
         if (dx !== 0 || dy !== 0) {
           node.style.transition = 'none';
           node.style.transform = `translate(${dx}px, ${dy}px)`;
-          // next frame → animate to 0
           requestAnimationFrame(() => {
             node.style.transition = 'transform 220ms cubic-bezier(.2,.7,.2,1)';
             node.style.transform = 'translate(0,0)';
@@ -141,16 +152,18 @@ export function GriddleGrid(props: GriddleGridProps) {
       if (tile.draggable === false) return;
       if ((e.target as HTMLElement).dataset.griddleHandle) return;
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-      const state: DragState = {
+      const ctrl = dragControllerRef.current!;
+      if (!ctrl.start(tile.id)) return;
+      dragStartPointerRef.current = { x: e.clientX, y: e.clientY };
+      setDrag({
         tileId: tile.id,
-        startPointerX: e.clientX,
-        startPointerY: e.clientY,
-        startCol: tile.col,
-        startRow: tile.row,
-        previewCol: tile.col,
-        previewRow: tile.row,
-      };
-      setDrag(state);
+        pickupCol: tile.col,
+        pickupRow: tile.row,
+        deltaX: 0,
+        deltaY: 0,
+        indicatorCol: tile.col,
+        indicatorRow: tile.row,
+      });
       e.stopPropagation();
     },
     [],
@@ -160,14 +173,22 @@ export function GriddleGrid(props: GriddleGridProps) {
     (e: PointerEvent) => {
       const d = dragRef.current;
       const r = resizeRef.current;
-      if (d && api.config.snapDuringDrag !== false) {
-        const dx = e.clientX - d.startPointerX;
-        const dy = e.clientY - d.startPointerY;
-        const col = Math.round(d.startCol + dx / colSize);
-        const row = Math.round(d.startRow + dy / rowSize);
-        if (col !== d.previewCol || row !== d.previewRow) {
-          setDrag({ ...d, previewCol: col, previewRow: row });
-        }
+      if (d) {
+        const dx = e.clientX - dragStartPointerRef.current.x;
+        const dy = e.clientY - dragStartPointerRef.current.y;
+        const candidateCol = d.pickupCol + Math.round(dx / colSize);
+        const candidateRow = d.pickupRow + Math.round(dy / rowSize);
+        const result = dragControllerRef.current!.update({
+          col: candidateCol,
+          row: candidateRow,
+        });
+        setDrag({
+          ...d,
+          deltaX: dx,
+          deltaY: dy,
+          indicatorCol: result.indicatorCell ? result.indicatorCell.col : null,
+          indicatorRow: result.indicatorCell ? result.indicatorCell.row : null,
+        });
       }
       if (r) {
         const dx = e.clientX - r.startPointerX;
@@ -188,26 +209,19 @@ export function GriddleGrid(props: GriddleGridProps) {
         }
       }
     },
-    [api, colSize, rowSize],
+    [colSize, rowSize],
   );
 
   const onPointerUp = useCallback(() => {
     const d = dragRef.current;
     const r = resizeRef.current;
     if (d) {
-      const tile = api.grid.getTile(d.tileId);
-      if (tile && (d.previewCol !== tile.col || d.previewRow !== tile.row)) {
-        const ok = api.moveTile(d.tileId, { col: d.previewCol, row: d.previewRow });
-        if (!ok) {
-          // Snap-back: no-op, preview ghost disappears
-        }
-      }
+      dragControllerRef.current!.end();
       setDrag(null);
     }
     if (r) {
       const tile = api.grid.getTile(r.tileId);
       if (tile) {
-        // If origin shifted (nw/ne/sw), move first, then resize.
         if (r.previewCol !== tile.col || r.previewRow !== tile.row) {
           api.moveTile(r.tileId, { col: r.previewCol, row: r.previewRow });
         }
@@ -264,6 +278,20 @@ export function GriddleGrid(props: GriddleGridProps) {
 
   const handles = config.resizeHandles ?? ['se'];
 
+  // Drop indicator rect (snapped to candidate cell, sized to dragger).
+  let indicatorRect: { left: number; top: number; width: number; height: number } | null = null;
+  if (drag && drag.indicatorCol !== null && drag.indicatorRow !== null) {
+    const t = api.grid.getTile(drag.tileId);
+    if (t) {
+      indicatorRect = {
+        left: drag.indicatorCol * colSize,
+        top: drag.indicatorRow * rowSize,
+        width: t.w * config.unitWidth + (t.w - 1) * (config.gap ?? 0),
+        height: t.h * config.unitHeight + (t.h - 1) * (config.gap ?? 0),
+      };
+    }
+  }
+
   return (
     <div
       ref={scrollRef}
@@ -286,18 +314,69 @@ export function GriddleGrid(props: GriddleGridProps) {
           ...bgStyle,
         }}
       >
+        {indicatorRect && (
+          <div
+            style={{
+              position: 'absolute',
+              left: indicatorRect.left,
+              top: indicatorRect.top,
+              width: indicatorRect.width,
+              height: indicatorRect.height,
+              boxSizing: 'border-box',
+              border: '2px dashed rgba(59, 91, 219, 0.55)',
+              background: 'rgba(59, 91, 219, 0.08)',
+              borderRadius: 4,
+              pointerEvents: 'none',
+              zIndex: 5,
+            }}
+          />
+        )}
         {rendered.map((tile) => {
           const isDragging = drag?.tileId === tile.id;
           const isResizing = resize?.tileId === tile.id;
-          const displayCol = isDragging ? drag!.previewCol : isResizing ? resize!.previewCol : tile.col;
-          const displayRow = isDragging ? drag!.previewRow : isResizing ? resize!.previewRow : tile.row;
+          // Dragger: pin visual position to pickup cell + cursor delta (free).
+          // Resizer: render at preview rect.
+          // Otherwise: live grid position.
+          const baseCol = isDragging
+            ? drag!.pickupCol
+            : isResizing
+              ? resize!.previewCol
+              : tile.col;
+          const baseRow = isDragging
+            ? drag!.pickupRow
+            : isResizing
+              ? resize!.previewRow
+              : tile.row;
           const displayW = isResizing ? resize!.previewW : tile.w;
           const displayH = isResizing ? resize!.previewH : tile.h;
-          const left = displayCol * colSize;
-          const top = displayRow * rowSize;
+          const left = baseCol * colSize;
+          const top = baseRow * rowSize;
           const width = displayW * config.unitWidth + (displayW - 1) * (config.gap ?? 0);
-          const height = displayH * config.unitHeight + (displayH - 1) * (config.gap ?? 0);
+          const heightPx = displayH * config.unitHeight + (displayH - 1) * (config.gap ?? 0);
           const tileHandles = tile.resizeHandles ?? handles;
+
+          const tileStyle: CSSProperties = {
+            position: 'absolute',
+            left,
+            top,
+            width,
+            height: heightPx,
+            boxSizing: 'border-box',
+            cursor: isDragging ? 'grabbing' : 'grab',
+            userSelect: 'none',
+            zIndex: isDragging ? 20 : isResizing ? 10 : 1,
+            opacity: isDragging || isResizing ? 0.85 : 1,
+            willChange: 'transform',
+            transform: isDragging
+              ? `translate(${drag!.deltaX}px, ${drag!.deltaY}px)`
+              : undefined,
+            filter: isDragging
+              ? 'drop-shadow(0 8px 16px rgba(0,0,0,0.18))'
+              : undefined,
+            transition: isDragging
+              ? 'filter 120ms ease-out, opacity 120ms ease-out'
+              : undefined,
+          };
 
           return (
             <div
@@ -308,19 +387,7 @@ export function GriddleGrid(props: GriddleGridProps) {
               }}
               data-griddle-tile={tile.id}
               onPointerDown={(e) => onTilePointerDown(e, tile)}
-              style={{
-                position: 'absolute',
-                left,
-                top,
-                width,
-                height,
-                boxSizing: 'border-box',
-                cursor: isDragging ? 'grabbing' : 'grab',
-                userSelect: 'none',
-                zIndex: isDragging || isResizing ? 10 : 1,
-                opacity: isDragging ? 0.85 : 1,
-                willChange: 'transform',
-              }}
+              style={tileStyle}
             >
               {renderTile(tile)}
               {tile.resizable !== false &&

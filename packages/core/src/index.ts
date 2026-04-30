@@ -37,3 +37,4 @@ export {
   type VisibleRange,
 } from './virtualize.js';
 export { Emitter } from './events.js';
+export { DragController, type DragUpdateResult } from './drag.js';

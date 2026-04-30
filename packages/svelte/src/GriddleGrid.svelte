@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import type { Corner, Tile } from '@griddle/core';
-  import { visibleRange, visibleTiles, gridContentSize } from '@griddle/core';
+  import { visibleRange, visibleTiles, gridContentSize, DragController } from '@griddle/core';
   import type { GriddleApi } from './griddleStore.js';
 
   export let api: GriddleApi;
@@ -24,12 +24,30 @@
   $: rendered = visibleTiles(tilesAll, range);
   $: contentSize = gridContentSize(cfg, tilesAll);
 
-  interface DragState {
+  // ---- drag / resize state ---------------------------------------------
+  // Drag uses the live-preview state machine in core: as the cursor crosses
+  // cell boundaries we rewind any prior preview and re-attempt the move
+  // against a snapshot taken at pickup. The dragged tile follows the cursor
+  // freely (unsnapped) for the duration of the gesture; a separate drop-
+  // indicator div renders at the snapped candidate cell.
+  const dragController = new DragController(api.grid);
+
+  interface DragVisual {
     tileId: string;
-    startPointerX: number; startPointerY: number;
-    startCol: number; startRow: number;
-    previewCol: number; previewRow: number;
+    /** Pickup cell, in cells. */
+    pickupCol: number;
+    pickupRow: number;
+    /** Cursor delta in raw pixels relative to pickup. */
+    deltaX: number;
+    deltaY: number;
+    /** Snapped indicator cell; null when current candidate is invalid. */
+    indicatorCol: number | null;
+    indicatorRow: number | null;
   }
+  let drag: DragVisual | null = null;
+  let dragStartPointerX = 0;
+  let dragStartPointerY = 0;
+
   interface ResizeState {
     tileId: string; corner: Corner;
     startPointerX: number; startPointerY: number;
@@ -38,13 +56,11 @@
     previewW: number; previewH: number;
     previewCol: number; previewRow: number;
   }
-  let drag: DragState | null = null;
   let resize: ResizeState | null = null;
 
   const tileNodes = new Map<string, HTMLDivElement>();
   const prevRects = new Map<string, { x: number; y: number }>();
 
-  // Svelte action: register a node for FLIP animations, keyed by tile id.
   function registerNode(node: HTMLDivElement, id: string) {
     tileNodes.set(id, node);
     return {
@@ -65,11 +81,17 @@
     if (tile.draggable === false) return;
     if ((e.target as HTMLElement).dataset.griddleHandle) return;
     (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    if (!dragController.start(tile.id)) return;
+    dragStartPointerX = e.clientX;
+    dragStartPointerY = e.clientY;
     drag = {
       tileId: tile.id,
-      startPointerX: e.clientX, startPointerY: e.clientY,
-      startCol: tile.col, startRow: tile.row,
-      previewCol: tile.col, previewRow: tile.row,
+      pickupCol: tile.col,
+      pickupRow: tile.row,
+      deltaX: 0,
+      deltaY: 0,
+      indicatorCol: tile.col,
+      indicatorRow: tile.row,
     };
     e.stopPropagation();
   }
@@ -87,14 +109,19 @@
     e.stopPropagation();
   }
   function onPointerMove(e: PointerEvent) {
-    if (drag && cfg.snapDuringDrag !== false) {
-      const dx = e.clientX - drag.startPointerX;
-      const dy = e.clientY - drag.startPointerY;
-      const col = Math.round(drag.startCol + dx / colSize);
-      const row = Math.round(drag.startRow + dy / rowSize);
-      if (col !== drag.previewCol || row !== drag.previewRow) {
-        drag = { ...drag, previewCol: col, previewRow: row };
-      }
+    if (drag) {
+      const dx = e.clientX - dragStartPointerX;
+      const dy = e.clientY - dragStartPointerY;
+      const candidateCol = drag.pickupCol + Math.round(dx / colSize);
+      const candidateRow = drag.pickupRow + Math.round(dy / rowSize);
+      const result = dragController.update({ col: candidateCol, row: candidateRow });
+      drag = {
+        ...drag,
+        deltaX: dx,
+        deltaY: dy,
+        indicatorCol: result.indicatorCell ? result.indicatorCell.col : null,
+        indicatorRow: result.indicatorCell ? result.indicatorCell.row : null,
+      };
     }
     if (resize) {
       const dx = e.clientX - resize.startPointerX;
@@ -117,10 +144,7 @@
   }
   function onPointerUp() {
     if (drag) {
-      const t = api.grid.getTile(drag.tileId);
-      if (t && (drag.previewCol !== t.col || drag.previewRow !== t.row)) {
-        api.moveTile(drag.tileId, { col: drag.previewCol, row: drag.previewRow });
-      }
+      dragController.end();
       drag = null;
     }
     if (resize) {
@@ -164,14 +188,22 @@
     window.removeEventListener('pointercancel', onPointerUp);
   });
 
-  // FLIP animation on version change
+  // FLIP animation on version change. Skip the active dragger — it has its
+  // own pixel-level transform driven by the cursor delta and we don't want
+  // FLIP to fight with that.
   $: runFlip(ver);
   async function runFlip(_v: number) {
     await tick();
+    const draggerId = drag?.tileId ?? null;
     for (const t of tilesAll) {
       const x = t.col * colSize;
       const y = t.row * rowSize;
       const p = prevRects.get(t.id);
+      if (t.id === draggerId) {
+        // Keep prevRect synced so the post-drop FLIP doesn't double-jump.
+        prevRects.set(t.id, { x, y });
+        continue;
+      }
       const node = tileNodes.get(t.id);
       if (p && node) {
         const dx = p.x - x;
@@ -189,13 +221,16 @@
     }
   }
 
+  // Position helpers. The dragger renders at pickup pixel + raw cursor delta
+  // (free-motion), with no FLIP. Resizing tiles render at their preview rect.
+  // All other tiles render at their current grid position.
   function tileLeft(tile: Tile): number {
-    if (drag?.tileId === tile.id) return drag.previewCol * colSize;
+    if (drag?.tileId === tile.id) return drag.pickupCol * colSize;
     if (resize?.tileId === tile.id) return resize.previewCol * colSize;
     return tile.col * colSize;
   }
   function tileTop(tile: Tile): number {
-    if (drag?.tileId === tile.id) return drag.previewRow * rowSize;
+    if (drag?.tileId === tile.id) return drag.pickupRow * rowSize;
     if (resize?.tileId === tile.id) return resize.previewRow * rowSize;
     return tile.row * rowSize;
   }
@@ -207,7 +242,27 @@
     const h = resize?.tileId === tile.id ? resize.previewH : tile.h;
     return h * cfg.unitHeight + (h - 1) * (cfg.gap ?? 0);
   }
-  function isActive(id: string) { return drag?.tileId === id || resize?.tileId === id; }
+  function tileTransform(tile: Tile): string {
+    if (drag?.tileId === tile.id) {
+      return `translate(${drag.deltaX}px, ${drag.deltaY}px)`;
+    }
+    return '';
+  }
+  function isDragging(id: string) { return drag?.tileId === id; }
+  function isResizing(id: string) { return resize?.tileId === id; }
+
+  // Drop indicator size matches the dragger's footprint.
+  $: indicatorRect = (() => {
+    if (!drag || drag.indicatorCol === null || drag.indicatorRow === null) return null;
+    const t = api.grid.getTile(drag.tileId);
+    if (!t) return null;
+    return {
+      left: drag.indicatorCol * colSize,
+      top: drag.indicatorRow * rowSize,
+      width: t.w * cfg.unitWidth + (t.w - 1) * (cfg.gap ?? 0),
+      height: t.h * cfg.unitHeight + (t.h - 1) * (cfg.gap ?? 0),
+    };
+  })();
 </script>
 
 <div
@@ -223,10 +278,20 @@
     style:--colsize={colSize + 'px'}
     style:--rowsize={rowSize + 'px'}
   >
+    {#if indicatorRect}
+      <div
+        class="griddle-drop-indicator"
+        style:left={indicatorRect.left + 'px'}
+        style:top={indicatorRect.top + 'px'}
+        style:width={indicatorRect.width + 'px'}
+        style:height={indicatorRect.height + 'px'}
+      ></div>
+    {/if}
     {#each rendered as tile (tile.id)}
       <div
         class="griddle-tile"
-        class:griddle-active={isActive(tile.id)}
+        class:griddle-dragging={isDragging(tile.id)}
+        class:griddle-resizing={isResizing(tile.id)}
         data-griddle-tile={tile.id}
         use:registerNode={tile.id}
         on:pointerdown={(e) => onTilePointerDown(e, tile)}
@@ -234,6 +299,7 @@
         style:top={tileTop(tile) + 'px'}
         style:width={tileW(tile) + 'px'}
         style:height={tileH(tile) + 'px'}
+        style:transform={tileTransform(tile)}
       >
         <slot name="tile" {tile} />
         {#if tile.resizable !== false}
@@ -275,10 +341,29 @@
     will-change: transform;
     z-index: 1;
   }
-  .griddle-tile.griddle-active {
+  .griddle-tile.griddle-resizing {
     z-index: 10;
     opacity: 0.85;
     cursor: grabbing;
+  }
+  .griddle-tile.griddle-dragging {
+    z-index: 20;
+    cursor: grabbing;
+    opacity: 0.85;
+    /* Lift the tile off the grid: drop shadow + subtle scale. The transform
+       is set inline (cursor delta), so the scale is folded into a CSS filter
+       to avoid clobbering it. */
+    filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.18));
+    transition: filter 120ms ease-out, opacity 120ms ease-out;
+  }
+  .griddle-drop-indicator {
+    position: absolute;
+    box-sizing: border-box;
+    border: 2px dashed rgba(59, 91, 219, 0.55);
+    background: rgba(59, 91, 219, 0.08);
+    border-radius: 4px;
+    pointer-events: none;
+    z-index: 5;
   }
   .griddle-handle {
     position: absolute;
