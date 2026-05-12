@@ -31,11 +31,44 @@ export interface Footprint {
   h: number;
 }
 
+/**
+ * CSS-like positioning mode for a tile. Default 'static'.
+ *
+ * - static   - normal grid tile; participates in displacement and compaction.
+ * - relative - keeps its grid slot; renders with a visual offset that doesn't
+ *              affect layout. Other tiles still treat its grid cell as taken.
+ * - absolute - out of grid flow. Pinned at coordinates given by 'pinned'.
+ *              Other tiles can occupy its col/row. Engine ignores it.
+ * - fixed    - like absolute but anchored to the scrollable container's
+ *              viewport, so it stays put when the grid scrolls.
+ * - sticky   - in flow normally, but pins to a viewport edge once scrolled
+ *              past the configured threshold.
+ *
+ * Requires GridConfig.enablePositioning = true to take effect; otherwise
+ * adapters render every tile as static.
+ */
+export type TilePosition =
+  | 'static'
+  | 'relative'
+  | 'absolute'
+  | 'fixed'
+  | 'sticky';
+
+/** Edge a sticky tile pins to. */
+export type StickyEdge = 'top' | 'bottom' | 'left' | 'right';
+
+export interface StickyConfig {
+  /** Edge of the scroll viewport to stick to. */
+  edge: StickyEdge;
+  /** Distance from the edge in CSS pixels. Default 0. */
+  threshold?: number;
+}
+
 /** Tile state stored in the grid. */
 export interface Tile extends CellPos, Footprint {
   /** Stable, unique string id. */
   id: string;
-  /** Arbitrary consumer payload — not interpreted by core. */
+  /** Arbitrary consumer payload - not interpreted by core. */
   data?: unknown;
   /** If set, overrides the grid-level resize handles for this tile. */
   resizeHandles?: Corner[];
@@ -48,13 +81,21 @@ export interface Tile extends CellPos, Footprint {
   minH?: number;
   maxW?: number;
   maxH?: number;
+  /** CSS-like positioning mode. Defaults to 'static'. */
+  position?: TilePosition;
+  /** For absolute/fixed: pinned coordinates (units per GridConfig.pinUnits). */
+  pinned?: { x: number; y: number };
+  /** For relative: visual offset that does NOT affect layout (units per GridConfig.relativeUnits). */
+  offset?: { x: number; y: number };
+  /** For sticky: edge + pixel threshold from that edge. */
+  sticky?: StickyConfig;
 }
 
 /** Grid configuration. */
 export interface GridConfig {
-  /** Columns. Use `Infinity` for horizontally infinite canvas. */
+  /** Columns. Use Infinity for horizontally infinite canvas. */
   cols: number;
-  /** Rows. Use `Infinity` for vertically infinite canvas. */
+  /** Rows. Use Infinity for vertically infinite canvas. */
   rows: number;
   /** Width of one cell, in CSS pixels. */
   unitWidth: number;
@@ -63,16 +104,34 @@ export interface GridConfig {
   /** Explicit infinite flags (auto-inferred from cols/rows === Infinity otherwise). */
   infiniteX?: boolean;
   infiniteY?: boolean;
-  /** Optional pixel gap between cells (purely visual — logic treats them as adjacent). */
+  /** Optional pixel gap between cells (purely visual). */
   gap?: number;
-  /** Compaction / gravity target. Default `'none'`. */
+  /** Compaction / gravity target. Default 'none'. */
   gravity?: Gravity;
-  /** Default corner handles shown on tiles. Default `['se']`. */
+  /** Default corner handles shown on tiles. Default ['se']. */
   resizeHandles?: Corner[];
-  /** Whether the tile snaps to grid cells during drag. Default `true`. */
+  /** Whether the tile snaps to grid cells during drag. Default true. */
   snapDuringDrag?: boolean;
   /** Max hops for the 0-1 BFS repack fallback on fixed grids. Default 64. */
   maxRepackHops?: number;
+  /**
+   * Master switch for CSS-like tile positioning. When true, tiles can use
+   * the 'position' field (and 'pinned' / 'offset' / 'sticky'). When false
+   * (the default), adapters render every tile in static grid flow regardless
+   * of any 'position' value set on the tile data.
+   */
+  enablePositioning?: boolean;
+  /**
+   * Coordinate units used by 'pinned' on absolute / fixed tiles. Default
+   * 'pixels'. 'subcell' measures in cells with float precision (e.g.
+   * { x: 3.5, y: 2.25 }); 'cells' measures in whole-cell coordinates.
+   */
+  pinUnits?: 'pixels' | 'subcell' | 'cells';
+  /**
+   * Units used by 'offset' on relative tiles. Default 'pixels'. 'subcell'
+   * measures in cells with float precision so the offset scales with cell size.
+   */
+  relativeUnits?: 'pixels' | 'subcell';
 }
 
 /** A rectangle in cells (inclusive col,row; exclusive col+w,row+h). */

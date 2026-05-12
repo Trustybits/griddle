@@ -19,6 +19,7 @@ import {
 } from './geometry.js';
 import { moveTile as moveEngine } from './movement.js';
 import { compact as compactEngine } from './compaction.js';
+import { isInFlow } from './positioning.js';
 
 function defaultConfig(c: GridConfig): GridConfig {
   return {
@@ -89,10 +90,17 @@ export class Grid {
     return this.tilesById.get(id);
   }
 
+  /**
+   * All tiles whose grid rect overlaps `rect`. Out-of-flow tiles
+   * (`position: 'absolute' | 'fixed'`) are skipped — they don't participate
+   * in collision/displacement queries even if their stored col/row happens
+   * to overlap.
+   */
   tilesIn(rect: CellRect, exclude: ReadonlySet<string> = new Set()): Tile[] {
     const out: Tile[] = [];
     for (const t of this.tilesById.values()) {
       if (exclude.has(t.id)) continue;
+      if (!isInFlow(t)) continue;
       if (rectsOverlap(rect, tileRect(t))) out.push(t);
     }
     return out;
@@ -151,9 +159,16 @@ export class Grid {
     t.h = rect.h;
   }
 
+  /**
+   * Move an in-flow tile to `target`, running the rules engine (displacement,
+   * cascade push, BFS repack). For out-of-flow tiles (`absolute`/`fixed`) this
+   * is a no-op — use `setTilePinned` instead.
+   */
   moveTile(id: string, target: CellPos): boolean {
     const tile = this.tilesById.get(id);
     if (!tile) return false;
+    // Out-of-flow tiles don't participate in cell-based moves.
+    if (!isInFlow(tile)) return false;
     if (tile.col === target.col && tile.row === target.row) return true;
     const ok = moveEngine(this, id, target);
     if (ok) {
@@ -163,6 +178,45 @@ export class Grid {
       }
     }
     return ok;
+  }
+
+  /**
+   * Update `tile.pinned` for an `absolute` or `fixed` tile. Returns false if
+   * the tile is missing or is in flow (use `moveTile` for those). Does NOT
+   * trigger the rules engine — pinned coords are independent of grid layout.
+   */
+  setTilePinned(id: string, pinned: { x: number; y: number }): boolean {
+    const tile = this.tilesById.get(id);
+    if (!tile) return false;
+    if (isInFlow(tile)) return false;
+    tile.pinned = { x: pinned.x, y: pinned.y };
+    this.changes.emit({ type: 'move', tileIds: [id] });
+    return true;
+  }
+
+  /**
+   * Change a tile's CSS-like positioning mode. When transitioning into
+   * `absolute`/`fixed` you can pass a `pinned` start position; switching back
+   * to `static`/`relative`/`sticky` keeps the tile's existing col/row so it
+   * snaps back into the grid where it logically belongs.
+   */
+  setTilePosition(
+    id: string,
+    position: NonNullable<Tile['position']>,
+    opts: {
+      pinned?: { x: number; y: number };
+      offset?: { x: number; y: number };
+      sticky?: NonNullable<Tile['sticky']>;
+    } = {},
+  ): boolean {
+    const tile = this.tilesById.get(id);
+    if (!tile) return false;
+    tile.position = position;
+    if (opts.pinned !== undefined) tile.pinned = { ...opts.pinned };
+    if (opts.offset !== undefined) tile.offset = { ...opts.offset };
+    if (opts.sticky !== undefined) tile.sticky = { ...opts.sticky };
+    this.changes.emit({ type: 'move', tileIds: [id] });
+    return true;
   }
 
   resizeTile(id: string, size: Footprint): boolean {
@@ -215,7 +269,6 @@ export class Grid {
       }
 
       if (!placed) {
-        // Fallback: find nearest free cell anywhere.
         const fallback = findNearestFreeCell(this, victim, newRect, id);
         if (fallback) {
           this._setTilePos(victim.id, fallback);
@@ -247,7 +300,7 @@ export class Grid {
     for (const [id, t] of snap) this.tilesById.set(id, { ...t });
   }
 
-  // ---- compaction -------------------------------------------------------
+  // ---- compaction --------------------------------------------------------
 
   compactAll(): void {
     const moved = compactEngine(this);

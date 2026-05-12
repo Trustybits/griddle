@@ -417,37 +417,3 @@ function tileStyle(tile: Tile) {
   };
 }
 
-
-const indicatorRect = computed(() => {
-  const d = drag.value;
-  if (!d || d.indicatorCol === null || d.indicatorRow === null) return null;
-  const t = props.api.grid.getTile(d.tileId);
-  if (!t) return null;
-  return {
-    left: d.indicatorCol * colSize.value,
-    top: d.indicatorRow * rowSize.value,
-    width: t.w * config.value.unitWidth + (t.w - 1) * (config.value.gap ?? 0),
-    height: t.h * config.value.unitHeight + (t.h - 1) * (config.value.gap ?? 0),
-  };
-});
-
-function handleStyle(c: Corner) {
-  const size = 12;
-  const base = {
-    position: 'absolute' as const,
-    width: size + 'px',
-    height: size + 'px',
-    background: 'rgba(60,60,60,0.7)',
-    border: '2px solid white',
-    borderRadius: '3px',
-    cursor: `${c}-resize`,
-    touchAction: 'none' as const,
-  } as Record<string, unknown>;
-  if (c === 'nw') return { ...base, top: -size / 2 + 'px', left: -size / 2 + 'px' };
-  if (c === 'ne') return { ...base, top: -size / 2 + 'px', right: -size / 2 + 'px' };
-  if (c === 'sw') return { ...base, bottom: -size / 2 + 'px', left: -size / 2 + 'px' };
-  return { ...base, bottom: -size / 2 + 'px', right: -size / 2 + 'px' };
-}
-
-const className = computed(() => props.className ?? '');
-</script>

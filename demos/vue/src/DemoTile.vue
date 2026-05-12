@@ -1,10 +1,11 @@
 <template>
-  <div :style="containerStyle">
+  <div :style="containerStyle" @click.stop="$emit('select', tile.id)">
     <span>{{ tile.id }}</span>
     <span :style="sizeLabelStyle">{{ tile.w }}×{{ tile.h }}</span>
+    <span v-if="tile.position && tile.position !== 'static'" :style="badgeStyle">{{ tile.position }}</span>
     <button
       @pointerdown.stop
-      @click="$emit('remove', tile.id)"
+      @click.stop="$emit('remove', tile.id)"
       :style="buttonStyle"
       :aria-label="`Remove tile ${tile.id}`"
     >×</button>
@@ -16,8 +17,8 @@ import { computed } from 'vue';
 import type { Tile } from '@griddle/core';
 import { colorForSize } from './palette.js';
 
-const props = defineProps<{ tile: Tile }>();
-defineEmits<{ (e: 'remove', id: string): void }>();
+const props = defineProps<{ tile: Tile; selected?: boolean }>();
+defineEmits<{ (e: 'remove', id: string): void; (e: 'select', id: string): void }>();
 
 const containerStyle = computed(() => ({
   width: '100%',
@@ -25,7 +26,9 @@ const containerStyle = computed(() => ({
   background: colorForSize(props.tile.w, props.tile.h),
   color: 'white',
   borderRadius: '8px',
-  boxShadow: '0 1px 3px rgba(0,0,0,0.15), inset 0 0 0 1px rgba(255,255,255,0.15)',
+  boxShadow: props.selected
+    ? '0 0 0 3px #3b5bdb, 0 1px 3px rgba(0,0,0,0.15), inset 0 0 0 1px rgba(255,255,255,0.15)'
+    : '0 1px 3px rgba(0,0,0,0.15), inset 0 0 0 1px rgba(255,255,255,0.15)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -34,11 +37,39 @@ const containerStyle = computed(() => ({
   position: 'relative' as const,
   userSelect: 'none' as const,
 }));
-const sizeLabelStyle = { position: 'absolute' as const, top: '6px', left: '8px', fontSize: '11px', opacity: 0.75 };
+const sizeLabelStyle = {
+  position: 'absolute' as const,
+  top: '6px',
+  left: '8px',
+  fontSize: '11px',
+  opacity: 0.75,
+};
+const badgeStyle = {
+  position: 'absolute' as const,
+  bottom: '6px',
+  left: '8px',
+  fontSize: '10px',
+  fontWeight: '500',
+  background: 'rgba(0,0,0,0.35)',
+  color: 'white',
+  padding: '2px 6px',
+  borderRadius: '999px',
+  textTransform: 'uppercase' as const,
+  letterSpacing: '0.5px',
+};
 const buttonStyle = {
-  position: 'absolute' as const, top: '4px', right: '4px',
-  width: '22px', height: '22px', border: 'none', borderRadius: '11px',
-  background: 'rgba(0,0,0,0.25)', color: 'white', cursor: 'pointer',
-  fontSize: '14px', lineHeight: '22px', padding: '0',
+  position: 'absolute' as const,
+  top: '4px',
+  right: '4px',
+  width: '22px',
+  height: '22px',
+  border: 'none',
+  borderRadius: '11px',
+  background: 'rgba(0,0,0,0.25)',
+  color: 'white',
+  cursor: 'pointer',
+  fontSize: '14px',
+  lineHeight: '22px',
+  padding: '0',
 };
 </script>

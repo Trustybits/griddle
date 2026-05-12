@@ -26,11 +26,9 @@ import {
   gridContentSize,
   DragController,
   computeTileLayout,
-  resolveStickyStacking,
   isOutOfFlow,
   pixelsToPin,
 } from '@griddle/core';
-import type { TileLayout } from '@griddle/core';
 import { useGridVersion } from './useGriddle.js';
 
 export interface GriddleGridProps {
@@ -336,54 +334,6 @@ export function GriddleGrid(props: GriddleGridProps) {
 
   const handles = config.resizeHandles ?? ['se'];
 
-  // Compute layouts for all rendered tiles in one pass so resolveStickyStacking
-  // can see every sticky tile and adjust them as a group. Recomputes whenever
-  // the relevant inputs change.
-  const tileLayouts = useMemo(() => {
-    const out = new Map<string, TileLayout>();
-    const stickyEntries: { tile: Tile; layout: TileLayout }[] = [];
-    for (const tile of rendered) {
-      let layout: TileLayout;
-      if (resize?.tileId === tile.id) {
-        const w = resize.previewW;
-        const h = resize.previewH;
-        layout = {
-          left: resize.previewCol * colSize,
-          top: resize.previewRow * rowSize,
-          width: w * config.unitWidth + (w - 1) * (config.gap ?? 0),
-          height: h * config.unitHeight + (h - 1) * (config.gap ?? 0),
-          zIndex: 10,
-          effective: 'static',
-        };
-      } else if (drag?.tileId === tile.id) {
-        layout = {
-          left: drag.pickupCol * colSize,
-          top: drag.pickupRow * rowSize,
-          width: tile.w * config.unitWidth + (tile.w - 1) * (config.gap ?? 0),
-          height: tile.h * config.unitHeight + (tile.h - 1) * (config.gap ?? 0),
-          transform: `translate(${drag.deltaX}px, ${drag.deltaY}px)`,
-          zIndex: 20,
-          effective: 'static',
-        };
-      } else {
-        layout = computeTileLayout({
-          tile,
-          config,
-          scrollX: viewport.scrollX,
-          scrollY: viewport.scrollY,
-          viewportWidth: viewport.width,
-          viewportHeight: viewport.height,
-        });
-        if (layout.effective === 'sticky') {
-          stickyEntries.push({ tile, layout });
-        }
-      }
-      out.set(tile.id, layout);
-    }
-    if (stickyEntries.length > 1) resolveStickyStacking(stickyEntries);
-    return out;
-  }, [rendered, drag, resize, config, viewport, colSize, rowSize]);
-
   // Drop indicator rect (snapped to candidate cell, sized to dragger).
   let indicatorRect: { left: number; top: number; width: number; height: number } | null = null;
   if (drag && drag.indicatorCol !== null && drag.indicatorRow !== null) {
@@ -443,15 +393,42 @@ export function GriddleGrid(props: GriddleGridProps) {
           const isResizing = resize?.tileId === tile.id;
           const tileHandles = tile.resizeHandles ?? handles;
 
-          const layout = tileLayouts.get(tile.id) ?? {
-            left: 0, top: 0, width: 0, height: 0, zIndex: 1, effective: 'static' as const,
-          };
-          const left = layout.left;
-          const top = layout.top;
-          const width = layout.width;
-          const heightPx = layout.height;
-          const transform = layout.transform;
-          const zIndex = layout.zIndex;
+          let left: number, top: number, width: number, heightPx: number;
+          let transform: string | undefined;
+          let zIndex = 1;
+
+          if (isResizing) {
+            const w = resize!.previewW;
+            const h = resize!.previewH;
+            left = resize!.previewCol * colSize;
+            top = resize!.previewRow * rowSize;
+            width = w * config.unitWidth + (w - 1) * (config.gap ?? 0);
+            heightPx = h * config.unitHeight + (h - 1) * (config.gap ?? 0);
+            zIndex = 10;
+          } else if (isDragging) {
+            // Pin visual position to pickup cell + cursor delta (free-motion).
+            left = drag!.pickupCol * colSize;
+            top = drag!.pickupRow * rowSize;
+            width = tile.w * config.unitWidth + (tile.w - 1) * (config.gap ?? 0);
+            heightPx = tile.h * config.unitHeight + (tile.h - 1) * (config.gap ?? 0);
+            transform = `translate(${drag!.deltaX}px, ${drag!.deltaY}px)`;
+            zIndex = 20;
+          } else {
+            const layout = computeTileLayout({
+              tile,
+              config,
+              scrollX: viewport.scrollX,
+              scrollY: viewport.scrollY,
+              viewportWidth: viewport.width,
+              viewportHeight: viewport.height,
+            });
+            left = layout.left;
+            top = layout.top;
+            width = layout.width;
+            heightPx = layout.height;
+            transform = layout.transform;
+            zIndex = layout.zIndex;
+          }
 
           const lifted = isDragging || isPinDragging;
           const tileStyle: CSSProperties = {
@@ -489,35 +466,6 @@ export function GriddleGrid(props: GriddleGridProps) {
                     key={c}
                     data-griddle-handle={c}
                     onPointerDown={(e) => onResizeHandleDown(e, tile, c)}
-                    style={handleStyle(c)}
-                  />
-                ))}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function handleStyle(c: Corner): CSSProperties {
-  const size = 12;
-  const base: CSSProperties = {
-    position: 'absolute',
-    width: size,
-    height: size,
-    background: 'rgba(60,60,60,0.7)',
-    border: '2px solid white',
-    borderRadius: 3,
-    cursor: `${c}-resize`,
-    touchAction: 'none',
-  };
-  if (c === 'nw') return { ...base, top: -size / 2, left: -size / 2 };
-  if (c === 'ne') return { ...base, top: -size / 2, right: -size / 2 };
-  if (c === 'sw') return { ...base, bottom: -size / 2, left: -size / 2 };
-  return { ...base, bottom: -size / 2, right: -size / 2 };
-}
-(e) => onResizeHandleDown(e, tile, c)}
                     style={handleStyle(c)}
                   />
                 ))}

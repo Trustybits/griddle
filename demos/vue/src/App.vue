@@ -1,10 +1,15 @@
 <template>
   <div style="display:flex;height:100%">
-    <ConfigPanel :api="api" @add="handleAdd" />
+    <ConfigPanel :api="api" :selected-tile-id="selectedTileId" @add="handleAdd" @select-tile="(id) => selectedTileId = id" />
     <div style="flex:1;background:#eef1f5;position:relative">
       <GriddleGrid :api="api">
         <template #tile="{ tile }">
-          <DemoTile :tile="tile" @remove="handleRemove" />
+          <DemoTile
+            :tile="tile"
+            :selected="tile.id === selectedTileId"
+            @remove="handleRemove"
+            @select="(id) => selectedTileId = id"
+          />
         </template>
       </GriddleGrid>
     </div>
@@ -12,9 +17,12 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue';
 import { GriddleGrid, useGriddle } from '@griddle/vue';
 import ConfigPanel from './ConfigPanel.vue';
 import DemoTile from './DemoTile.vue';
+
+const selectedTileId = ref<string>('');
 
 const api = useGriddle({
   config: {
@@ -59,6 +67,7 @@ function handleAdd(w: number, h: number) {
   api.addTile({ id: String(nextId++), col: 0, row: 0, w, h });
 }
 function handleRemove(id: string) {
+  if (selectedTileId.value === id) selectedTileId.value = '';
   api.removeTile(id);
 }
 </script>

@@ -6,6 +6,7 @@
 import type { CellPos, CellRect, Gravity, Tile } from './types.js';
 import type { Grid } from './grid.js';
 import { rectsOverlap, tileRect } from './geometry.js';
+import { isInFlow } from './positioning.js';
 
 export function compact(grid: Grid): string[] {
   const gravity = grid.config.gravity ?? 'none';
@@ -17,10 +18,13 @@ export function compact(grid: Grid): string[] {
     let anyMoved = false;
 
     // Order tiles so that those closest to the anchor move first — otherwise
-    // a further tile may try to move into a cell not yet vacated by the closer one.
-    const ordered = [...grid.tiles].sort((a, b) =>
-      distanceToAnchor(a, gravity) - distanceToAnchor(b, gravity),
-    );
+    // a further tile may try to move into a cell not yet vacated by the closer
+    // one. Out-of-flow tiles (absolute/fixed) are skipped entirely by gravity.
+    const ordered = [...grid.tiles]
+      .filter((t) => isInFlow(t))
+      .sort((a, b) =>
+        distanceToAnchor(a, gravity) - distanceToAnchor(b, gravity),
+      );
 
     for (const t of ordered) {
       const step = stepToward(t, gravity);
@@ -33,7 +37,7 @@ export function compact(grid: Grid): string[] {
       };
       if (!grid.rectInBounds(newRect)) continue;
       const overlap = grid.tiles.filter(
-        (o) => o.id !== t.id && rectsOverlap(tileRect(o), newRect),
+        (o) => o.id !== t.id && isInFlow(o) && rectsOverlap(tileRect(o), newRect),
       );
       if (overlap.length > 0) continue;
       grid._setTilePos(t.id, { col: newRect.col, row: newRect.row });
@@ -72,6 +76,5 @@ function distanceToAnchor(t: Tile, gravity: Gravity): number {
   if (gravity === 'bottom') return -t.row;
   if (gravity === 'left') return t.col;
   if (gravity === 'right') return -t.col;
-  // Manhattan distance to anchor cell
   return Math.abs(gravity.col - t.col) + Math.abs(gravity.row - t.row);
 }

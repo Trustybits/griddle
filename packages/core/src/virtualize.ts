@@ -40,11 +40,20 @@ export function visibleRange(
   };
 }
 
-/** Filter tiles to only those overlapping the visible range. */
+/**
+ * Filter tiles to only those overlapping the visible range. Tiles that are NOT
+ * laid out by their grid cell (`absolute`, `fixed`, `sticky`) are always
+ * included — their on-screen position is independent of their `col/row`, so
+ * filtering by cell-overlap would incorrectly cull them when the user scrolls
+ * past their natural cell.
+ */
 export function visibleTiles(tiles: Tile[], range: VisibleRange): Tile[] {
-  return tiles.filter((t) =>
-    rectsOverlap({ col: t.col, row: t.row, w: t.w, h: t.h }, range),
-  );
+  return tiles.filter((t) => {
+    if (t.position && t.position !== 'static' && t.position !== 'relative') {
+      return true;
+    }
+    return rectsOverlap({ col: t.col, row: t.row, w: t.w, h: t.h }, range);
+  });
 }
 
 /** Compute the total pixel size of the grid content (for scroll container sizing). */

@@ -12,7 +12,10 @@ export type {
   GridChangeEvent,
   GridConfig,
   GridSnapshot,
+  StickyConfig,
+  StickyEdge,
   Tile,
+  TilePosition,
 } from './types.js';
 export {
   rectsOverlap,
@@ -38,3 +41,14 @@ export {
 } from './virtualize.js';
 export { Emitter } from './events.js';
 export { DragController, type DragUpdateResult } from './drag.js';
+export {
+  isInFlow,
+  isOutOfFlow,
+  pinnedToPixels,
+  pixelsToPin,
+  offsetToPixels,
+  pixelsToOffset,
+  computeTileLayout,
+  resolveStickyStacking,
+} from './positioning.js';
+export type { TileLayout, TileLayoutInput } from './positioning.js';

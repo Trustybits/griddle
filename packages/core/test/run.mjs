@@ -305,6 +305,61 @@ test('toJSON / fromJSON roundtrip', () => {
   eq(g2.config.gravity, 'top');
 });
 
+// ---- Positioning ------------------------------------------------------
+
+test('Positioning: absolute tiles are skipped by tilesIn', () => {
+  const g = new Grid({ cols: 10, rows: 10, unitWidth: 50, unitHeight: 50 });
+  g.addTile({ id: 'a', col: 0, row: 0, w: 1, h: 1 });
+  g.addTile({ id: 'b', col: 0, row: 0, w: 1, h: 1, position: 'absolute', pinned: { x: 100, y: 100 } });
+  const hits = g.tilesIn({ col: 0, row: 0, w: 1, h: 1 });
+  eq(hits.length, 1);
+  eq(hits[0].id, 'a');
+});
+
+test('Positioning: moveTile rejects out-of-flow tiles', () => {
+  const g = new Grid({ cols: 10, rows: 10, unitWidth: 50, unitHeight: 50 });
+  g.addTile({ id: 'a', col: 0, row: 0, w: 1, h: 1, position: 'fixed', pinned: { x: 50, y: 50 } });
+  const ok = g.moveTile('a', { col: 5, row: 5 });
+  assert(!ok, 'moveTile must return false for out-of-flow tiles');
+});
+
+test('Positioning: setTilePinned updates pinned coords for absolute', () => {
+  const g = new Grid({ cols: 10, rows: 10, unitWidth: 50, unitHeight: 50 });
+  g.addTile({ id: 'a', col: 0, row: 0, w: 1, h: 1, position: 'absolute', pinned: { x: 0, y: 0 } });
+  const ok = g.setTilePinned('a', { x: 200, y: 80 });
+  assert(ok);
+  const t = g.getTile('a');
+  eq(t.pinned.x, 200);
+  eq(t.pinned.y, 80);
+});
+
+test('Positioning: setTilePinned rejects in-flow tiles', () => {
+  const g = new Grid({ cols: 10, rows: 10, unitWidth: 50, unitHeight: 50 });
+  g.addTile({ id: 'a', col: 0, row: 0, w: 1, h: 1 });
+  const ok = g.setTilePinned('a', { x: 50, y: 50 });
+  assert(!ok, 'setTilePinned must reject static tiles');
+});
+
+test('Positioning: setTilePosition transitions modes', () => {
+  const g = new Grid({ cols: 10, rows: 10, unitWidth: 50, unitHeight: 50 });
+  g.addTile({ id: 'a', col: 3, row: 4, w: 1, h: 1 });
+  g.setTilePosition('a', 'absolute', { pinned: { x: 100, y: 100 } });
+  eq(g.getTile('a').position, 'absolute');
+  eq(g.getTile('a').pinned.x, 100);
+  eq(g.getTile('a').col, 3);
+  eq(g.getTile('a').row, 4);
+  g.addTile({ id: 'b', col: 3, row: 4, w: 1, h: 1 });
+  eq(g.getTile('b').col, 3);
+});
+
+test('Positioning: relative tiles still occupy their grid slot', () => {
+  const g = new Grid({ cols: 10, rows: 10, unitWidth: 50, unitHeight: 50 });
+  g.addTile({ id: 'a', col: 5, row: 5, w: 1, h: 1, position: 'relative', offset: { x: 20, y: 0 } });
+  const hits = g.tilesIn({ col: 5, row: 5, w: 1, h: 1 });
+  eq(hits.length, 1);
+  eq(hits[0].id, 'a');
+});
+
 // ---- Resize -----------------------------------------------------------
 
 test('resizeTile shrinks without displacement', () => {
