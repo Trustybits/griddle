@@ -167,7 +167,6 @@ export class Grid {
   moveTile(id: string, target: CellPos): boolean {
     const tile = this.tilesById.get(id);
     if (!tile) return false;
-    // Out-of-flow tiles don't participate in cell-based moves.
     if (!isInFlow(tile)) return false;
     if (tile.col === target.col && tile.row === target.row) return true;
     const ok = moveEngine(this, id, target);
@@ -178,6 +177,98 @@ export class Grid {
       }
     }
     return ok;
+  }
+
+  /**
+   * Move a group of in-flow tiles by a uniform cell delta, preserving their
+   * relative positions. Non-group tiles that overlap after the shift are
+   * displaced using the single-tile rules engine. Returns true if the entire
+   * group landed successfully; on failure, the grid is left unchanged.
+   */
+  moveGroup(ids: string[], delta: { dcol: number; drow: number }): boolean {
+    if (ids.length === 0) return true;
+    if (delta.dcol === 0 && delta.drow === 0) return true;
+
+    const groupSet = new Set(ids);
+    const groupTiles: Tile[] = [];
+    for (const id of ids) {
+      const tile = this.tilesById.get(id);
+      if (!tile || !isInFlow(tile)) return false;
+      groupTiles.push(tile);
+    }
+
+    // Compute target positions and validate bounds.
+    const targets = new Map<string, CellPos>();
+    for (const tile of groupTiles) {
+      const target: CellPos = {
+        col: tile.col + delta.dcol,
+        row: tile.row + delta.drow,
+      };
+      const rect: CellRect = { col: target.col, row: target.row, w: tile.w, h: tile.h };
+      if (!this.rectInBounds(rect)) return false;
+      targets.set(tile.id, target);
+    }
+
+    const snapshot = this.snapshotTiles();
+
+    // Place all group tiles at their new positions.
+    for (const [id, pos] of targets) {
+      this._setTilePos(id, pos);
+    }
+
+    // Collect non-group tiles that now overlap with any group member.
+    const victims = new Set<string>();
+    for (const tile of groupTiles) {
+      const target = targets.get(tile.id)!;
+      const targetRect: CellRect = { col: target.col, row: target.row, w: tile.w, h: tile.h };
+      for (const hit of this.tilesIn(targetRect, groupSet)) {
+        victims.add(hit.id);
+      }
+    }
+
+    // Try to displace each victim using the single-tile movement engine
+    // against the combined group bounding box as origin.
+    const groupBounds = this._groupBounds(groupTiles, targets);
+    for (const victimId of victims) {
+      const victim = this.tilesById.get(victimId);
+      if (!victim) continue;
+      const victimTarget = findNearestFreeCell(this, victim, groupBounds, victimId);
+      if (!victimTarget) {
+        this.restoreTiles(snapshot);
+        return false;
+      }
+      this._setTilePos(victimId, victimTarget);
+    }
+
+    // Final validation: ensure no group tile overlaps another non-group tile.
+    for (const tile of groupTiles) {
+      const pos = targets.get(tile.id)!;
+      const rect: CellRect = { col: pos.col, row: pos.row, w: tile.w, h: tile.h };
+      const hits = this.tilesIn(rect, groupSet);
+      if (hits.length > 0) {
+        this.restoreTiles(snapshot);
+        return false;
+      }
+    }
+
+    this.changes.emit({ type: 'move', tileIds: this.tiles.map((t) => t.id) });
+    if (this.config.gravity && this.config.gravity !== 'none') {
+      this.compactAll();
+    }
+    return true;
+  }
+
+  /** Bounding rect of a group of tiles at their target positions. */
+  private _groupBounds(tiles: Tile[], targets: Map<string, CellPos>): CellRect {
+    let minCol = Infinity, minRow = Infinity, maxCol = -Infinity, maxRow = -Infinity;
+    for (const tile of tiles) {
+      const pos = targets.get(tile.id) ?? { col: tile.col, row: tile.row };
+      minCol = Math.min(minCol, pos.col);
+      minRow = Math.min(minRow, pos.row);
+      maxCol = Math.max(maxCol, pos.col + tile.w);
+      maxRow = Math.max(maxRow, pos.row + tile.h);
+    }
+    return { col: minCol, row: minRow, w: maxCol - minCol, h: maxRow - minRow };
   }
 
   /**

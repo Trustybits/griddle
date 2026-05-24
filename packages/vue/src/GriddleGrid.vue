@@ -3,6 +3,7 @@
     ref="scrollEl"
     :class="className"
     :style="scrollStyle"
+    @pointerdown="onBackgroundPointerDown"
   >
     <div :style="contentStyle">
       <div
@@ -27,14 +28,15 @@
         :key="tile.id"
         :data-griddle-tile="tile.id"
         :class="['griddle-tile', {
-          'griddle-dragging': drag?.tileId === tile.id || pinDrag?.tileId === tile.id,
+          'griddle-dragging': drag?.tileId === tile.id || pinDrag?.tileId === tile.id || (groupDrag !== null && groupDragSet.has(tile.id)),
           'griddle-resizing': resize?.tileId === tile.id,
+          'griddle-selected': selection.has(tile.id),
         }]"
         :style="tileStyle(tile)"
         @pointerdown="(e) => onTilePointerDown(e, tile)"
         :ref="(el) => registerNode(tile.id, el as HTMLDivElement | null)"
       >
-        <slot name="tile" :tile="tile" />
+        <slot name="tile" :tile="tile" :selected="selection.has(tile.id)" />
         <template v-if="tile.resizable !== false">
           <div
             v-for="c in (tile.resizeHandles ?? config.resizeHandles ?? ['se'])"
@@ -57,6 +59,7 @@ import {
   visibleTiles,
   gridContentSize,
   DragController,
+  GroupDragController,
   computeTileLayout,
   resolveStickyStacking,
   isOutOfFlow,
@@ -70,6 +73,12 @@ const props = defineProps<{
   className?: string;
   height?: number | string;
   showGrid?: boolean;
+  /** Controlled selection. If omitted, managed internally. */
+  selection?: Set<string>;
+}>();
+
+const emit = defineEmits<{
+  (e: 'selectionChange', selection: Set<string>): void;
 }>();
 
 const scrollEl = ref<HTMLDivElement | null>(null);
@@ -110,7 +119,17 @@ const contentStyle = computed(() => {
   };
 });
 
+// Selection state
+const internalSelection = ref<Set<string>>(new Set());
+const selection = computed(() => props.selection ?? internalSelection.value);
+const groupDragSet = computed(() => new Set(groupDrag.value?.tileIds ?? []));
+function setSelection(next: Set<string>) {
+  if (!props.selection) internalSelection.value = next;
+  emit('selectionChange', next);
+}
+
 const dragController = new DragController(props.api.grid);
+const groupDragController = new GroupDragController(props.api.grid);
 
 interface DragVisual {
   tileId: string;
@@ -124,6 +143,15 @@ interface DragVisual {
 const drag = ref<DragVisual | null>(null);
 let dragStartPointerX = 0;
 let dragStartPointerY = 0;
+
+interface GroupDragVisual {
+  tileIds: string[];
+  deltaX: number;
+  deltaY: number;
+  committedDcol: number;
+  committedDrow: number;
+}
+const groupDrag = ref<GroupDragVisual | null>(null);
 
 interface PinDragState {
   tileId: string;
@@ -152,8 +180,12 @@ const resize = ref<ResizeState | null>(null);
 function onTilePointerDown(e: PointerEvent, tile: Tile) {
   if (tile.draggable === false) return;
   if ((e.target as HTMLElement).dataset.griddleHandle) return;
-  (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+
+  const metaKey = e.metaKey || e.ctrlKey;
+
+  // Out-of-flow tiles get free-pixel drag (no selection).
   if (config.value.enablePositioning && isOutOfFlow(tile)) {
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     const layout = computeTileLayout({
       tile,
       config: config.value,
@@ -175,6 +207,49 @@ function onTilePointerDown(e: PointerEvent, tile: Tile) {
     e.stopPropagation();
     return;
   }
+
+  // Cmd/Ctrl+click toggles selection without starting a drag.
+  if (metaKey) {
+    e.preventDefault();
+    const next = new Set(selection.value);
+    if (next.has(tile.id)) {
+      next.delete(tile.id);
+    } else {
+      next.add(tile.id);
+    }
+    setSelection(next);
+    e.stopPropagation();
+    return;
+  }
+
+  const tileIsSelected = selection.value.has(tile.id);
+
+  if (!tileIsSelected) {
+    setSelection(new Set([tile.id]));
+  }
+
+  // Capture pointer only when starting a drag.
+  (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+
+  // Group drag if 2+ tiles selected including this one.
+  const effectiveSelection = tileIsSelected ? selection.value : new Set([tile.id]);
+  if (effectiveSelection.size > 1) {
+    const ids = Array.from(effectiveSelection);
+    if (!groupDragController.start(ids)) return;
+    dragStartPointerX = e.clientX;
+    dragStartPointerY = e.clientY;
+    groupDrag.value = {
+      tileIds: ids,
+      deltaX: 0,
+      deltaY: 0,
+      committedDcol: 0,
+      committedDrow: 0,
+    };
+    e.stopPropagation();
+    return;
+  }
+
+  // Single tile drag.
   if (!dragController.start(tile.id)) return;
   dragStartPointerX = e.clientX;
   dragStartPointerY = e.clientY;
@@ -188,6 +263,11 @@ function onTilePointerDown(e: PointerEvent, tile: Tile) {
     indicatorRow: tile.row,
   };
   e.stopPropagation();
+}
+
+function onBackgroundPointerDown(e: PointerEvent) {
+  if ((e.target as HTMLElement).closest('[data-griddle-tile]')) return;
+  setSelection(new Set());
 }
 
 function onResizeHandleDown(e: PointerEvent, tile: Tile, c: Corner) {
@@ -212,6 +292,7 @@ function onResizeHandleDown(e: PointerEvent, tile: Tile, c: Corner) {
 
 function onPointerMove(e: PointerEvent) {
   const pd = pinDrag.value;
+  const gd = groupDrag.value;
   const d = drag.value;
   const r = resize.value;
   if (pd) {
@@ -220,6 +301,20 @@ function onPointerMove(e: PointerEvent) {
     const newPinPx = { x: pd.startPinPx.x + dx, y: pd.startPinPx.y + dy };
     const newPin = pixelsToPin(newPinPx, config.value);
     props.api.grid.setTilePinned(pd.tileId, newPin);
+  }
+  if (gd) {
+    const dx = e.clientX - dragStartPointerX;
+    const dy = e.clientY - dragStartPointerY;
+    const dcol = Math.round(dx / colSize.value);
+    const drow = Math.round(dy / rowSize.value);
+    const result = groupDragController.update({ dcol, drow });
+    groupDrag.value = {
+      ...gd,
+      deltaX: dx,
+      deltaY: dy,
+      committedDcol: result.indicatorDelta?.dcol ?? gd.committedDcol,
+      committedDrow: result.indicatorDelta?.drow ?? gd.committedDrow,
+    };
   }
   if (d) {
     const dx = e.clientX - dragStartPointerX;
@@ -255,13 +350,27 @@ function onPointerMove(e: PointerEvent) {
   }
 }
 
+function syncTiles() {
+  // DragController/GroupDragController may restore grid snapshots without
+  // emitting change events. Force-sync the reactive tiles ref so the UI
+  // reflects the grid's true state after a drag ends.
+  props.api.tiles.value = props.api.grid.tiles;
+  props.api.version.value++;
+}
+
 function onPointerUp() {
   if (pinDrag.value) {
     pinDrag.value = null;
   }
+  if (groupDrag.value) {
+    groupDragController.end();
+    groupDrag.value = null;
+    syncTiles();
+  }
   if (drag.value) {
     dragController.end();
     drag.value = null;
+    syncTiles();
   }
   const r = resize.value;
   if (r) {
@@ -289,6 +398,10 @@ function updateViewport() {
   };
 }
 
+function onKeyDown(e: KeyboardEvent) {
+  if (e.key === 'Escape') setSelection(new Set());
+}
+
 let ro: ResizeObserver | null = null;
 onMounted(() => {
   updateViewport();
@@ -299,6 +412,7 @@ onMounted(() => {
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);
   window.addEventListener('pointercancel', onPointerUp);
+  window.addEventListener('keydown', onKeyDown);
 });
 onBeforeUnmount(() => {
   const el = scrollEl.value;
@@ -307,6 +421,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
   window.removeEventListener('pointercancel', onPointerUp);
+  window.removeEventListener('keydown', onKeyDown);
 });
 
 const tileNodes = new Map<string, HTMLDivElement>();
@@ -319,10 +434,11 @@ function registerNode(id: string, el: HTMLDivElement | null) {
 watch(() => props.api.version.value, async () => {
   await nextTick();
   const draggerId = drag.value?.tileId ?? null;
+  const gdSet = groupDragSet.value;
   for (const t of props.api.tiles.value) {
     const x = t.col * colSize.value;
     const y = t.row * rowSize.value;
-    if (t.id === draggerId) {
+    if (t.id === draggerId || gdSet.has(t.id)) {
       prevRects.set(t.id, { x, y });
       continue;
     }
@@ -350,6 +466,8 @@ watch(() => props.api.version.value, async () => {
 const tileLayouts = computed(() => {
   const out = new Map<string, TileLayout>();
   const stickyEntries: { tile: Tile; layout: TileLayout }[] = [];
+  const gd = groupDrag.value;
+  const gdIds = groupDragSet.value;
   for (const tile of rendered.value) {
     let layout: TileLayout;
     if (resize.value?.tileId === tile.id) {
@@ -374,6 +492,19 @@ const tileLayouts = computed(() => {
         zIndex: 20,
         effective: 'static',
       };
+    } else if (gd && gdIds.has(tile.id)) {
+      const pickup = groupDragController.pickupCell(tile.id);
+      const left = pickup ? pickup.col * colSize.value : tile.col * colSize.value;
+      const top = pickup ? pickup.row * rowSize.value : tile.row * rowSize.value;
+      layout = {
+        left,
+        top,
+        width: tile.w * config.value.unitWidth + (tile.w - 1) * (config.value.gap ?? 0),
+        height: tile.h * config.value.unitHeight + (tile.h - 1) * (config.value.gap ?? 0),
+        transform: `translate(${gd.deltaX}px, ${gd.deltaY}px)`,
+        zIndex: 20,
+        effective: 'static',
+      };
     } else {
       layout = computeTileLayout({
         tile,
@@ -395,12 +526,14 @@ const tileLayouts = computed(() => {
 
 function tileStyle(tile: Tile) {
   const isDragging = drag.value?.tileId === tile.id;
+  const isGroupDragging = groupDragSet.value.has(tile.id) && groupDrag.value !== null;
   const isPinDragging = pinDrag.value?.tileId === tile.id;
   const isResizing = resize.value?.tileId === tile.id;
+  const isSelected = selection.value.has(tile.id);
   const layout = tileLayouts.value.get(tile.id) ?? {
     left: 0, top: 0, width: 0, height: 0, zIndex: 1, effective: 'static' as const,
   };
-  const lifted = isDragging || isPinDragging;
+  const lifted = isDragging || isPinDragging || isGroupDragging;
   return {
     position: 'absolute' as const,
     left: layout.left + 'px',
@@ -416,6 +549,10 @@ function tileStyle(tile: Tile) {
     transform: layout.transform ?? '',
     filter: lifted ? 'drop-shadow(0 8px 16px rgba(0,0,0,0.18))' : '',
     transition: lifted ? 'filter 120ms ease-out, opacity 120ms ease-out' : '',
+    boxShadow: isSelected
+      ? '0 0 0 3px rgba(59, 91, 219, 0.85), inset 0 0 0 1px rgba(59, 91, 219, 0.3)'
+      : '',
+    borderRadius: (config.value.tileRadius ?? 4) + 'px',
   };
 }
 

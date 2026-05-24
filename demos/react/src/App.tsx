@@ -60,7 +60,7 @@ export function App() {
       <div style={{ flex: 1, background: '#eef1f5', position: 'relative' }}>
         <GriddleGrid
           api={api}
-          renderTile={(t) => <DemoTile tile={t} onRemove={handleRemove} />}
+          renderTile={(t, _selected) => <DemoTile tile={t} onRemove={handleRemove} />}
         />
       </div>
     </div>

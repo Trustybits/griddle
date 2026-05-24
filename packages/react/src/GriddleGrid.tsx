@@ -25,6 +25,7 @@ import {
   visibleTiles,
   gridContentSize,
   DragController,
+  GroupDragController,
   computeTileLayout,
   resolveStickyStacking,
   isOutOfFlow,
@@ -35,13 +36,17 @@ import { useGridVersion } from './useGriddle.js';
 
 export interface GriddleGridProps {
   api: GriddleApi;
-  renderTile: (tile: Tile) => ReactNode;
+  renderTile: (tile: Tile, selected: boolean) => ReactNode;
   className?: string;
   style?: CSSProperties;
   /** Optional container height; default '100%'. */
   height?: number | string;
   /** Whether to render the background grid lines. Default true. */
   showGrid?: boolean;
+  /** Controlled selection state. If omitted, selection is managed internally. */
+  selection?: Set<string>;
+  /** Called whenever the selection changes. */
+  onSelectionChange?: (selection: Set<string>) => void;
 }
 
 interface DragVisual {
@@ -61,6 +66,16 @@ interface PinDragState {
   startPointerY: number;
 }
 
+interface GroupDragVisual {
+  tileIds: string[];
+  /** Pixel delta from pointer pickup */
+  deltaX: number;
+  deltaY: number;
+  /** Last committed cell delta (for drop indicators) */
+  committedDcol: number;
+  committedDrow: number;
+}
+
 interface ResizeState {
   tileId: string;
   corner: Corner;
@@ -77,9 +92,20 @@ interface ResizeState {
 }
 
 export function GriddleGrid(props: GriddleGridProps) {
-  const { api, renderTile, className, style, height = '100%', showGrid = true } = props;
+  const {
+    api, renderTile, className, style, height = '100%', showGrid = true,
+    selection: controlledSelection, onSelectionChange,
+  } = props;
   const config = api.config;
   const version = useGridVersion(api.grid);
+
+  // Selection state (internal or controlled)
+  const [internalSelection, setInternalSelection] = useState<Set<string>>(new Set());
+  const selection = controlledSelection ?? internalSelection;
+  const setSelection = useCallback((next: Set<string>) => {
+    if (!controlledSelection) setInternalSelection(next);
+    onSelectionChange?.(next);
+  }, [controlledSelection, onSelectionChange]);
 
   // Virtualization viewport
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -121,13 +147,20 @@ export function GriddleGrid(props: GriddleGridProps) {
   if (!dragControllerRef.current) {
     dragControllerRef.current = new DragController(api.grid);
   }
+  const groupDragControllerRef = useRef<GroupDragController | null>(null);
+  if (!groupDragControllerRef.current) {
+    groupDragControllerRef.current = new GroupDragController(api.grid);
+  }
   const [drag, setDrag] = useState<DragVisual | null>(null);
+  const [groupDrag, setGroupDrag] = useState<GroupDragVisual | null>(null);
   const [resize, setResize] = useState<ResizeState | null>(null);
   const [pinDrag, setPinDrag] = useState<PinDragState | null>(null);
   const dragRef = useRef<DragVisual | null>(null);
+  const groupDragRef = useRef<GroupDragVisual | null>(null);
   const resizeRef = useRef<ResizeState | null>(null);
   const pinDragRef = useRef<PinDragState | null>(null);
   dragRef.current = drag;
+  groupDragRef.current = groupDrag;
   resizeRef.current = resize;
   pinDragRef.current = pinDrag;
   const dragStartPointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -141,13 +174,14 @@ export function GriddleGrid(props: GriddleGridProps) {
     const prev = prevRectsRef.current;
     const next = new Map<string, { x: number; y: number; w: number; h: number }>();
     const draggerId = dragRef.current?.tileId ?? null;
+    const groupDragIds = new Set(groupDragRef.current?.tileIds ?? []);
     for (const t of tiles) {
       const x = t.col * colSize;
       const y = t.row * rowSize;
       const w = t.w * config.unitWidth + (t.w - 1) * (config.gap ?? 0);
       const h = t.h * config.unitHeight + (t.h - 1) * (config.gap ?? 0);
       next.set(t.id, { x, y, w, h });
-      if (t.id === draggerId) continue; // dragger handled by inline transform
+      if (t.id === draggerId || groupDragIds.has(t.id)) continue;
       const p = prev.get(t.id);
       const node = tileNodes.current.get(t.id);
       if (p && node) {
@@ -171,9 +205,12 @@ export function GriddleGrid(props: GriddleGridProps) {
     (e: React.PointerEvent<HTMLDivElement>, tile: Tile) => {
       if (tile.draggable === false) return;
       if ((e.target as HTMLElement).dataset.griddleHandle) return;
-      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-      // Out-of-flow tiles get free-pixel drag.
+
+      const metaKey = e.metaKey || e.ctrlKey;
+
+      // Out-of-flow tiles get free-pixel drag (no selection behavior).
       if (config.enablePositioning && isOutOfFlow(tile)) {
+        (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
         const layout = computeTileLayout({
           tile,
           config,
@@ -195,6 +232,50 @@ export function GriddleGrid(props: GriddleGridProps) {
         e.stopPropagation();
         return;
       }
+
+      // Cmd/Ctrl+click toggles the tile in/out of the selection without
+      // starting any drag. No pointer capture needed.
+      if (metaKey) {
+        e.preventDefault();
+        const next = new Set(selection);
+        if (next.has(tile.id)) {
+          next.delete(tile.id);
+        } else {
+          next.add(tile.id);
+        }
+        setSelection(next);
+        e.stopPropagation();
+        return;
+      }
+
+      const tileIsSelected = selection.has(tile.id);
+
+      if (!tileIsSelected) {
+        setSelection(new Set([tile.id]));
+      }
+
+      // Capture pointer only when starting a drag.
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+
+      // Determine if this should be a group drag (2+ selected tiles including this one).
+      const effectiveSelection = tileIsSelected ? selection : new Set([tile.id]);
+      if (effectiveSelection.size > 1) {
+        const ids = Array.from(effectiveSelection);
+        const ctrl = groupDragControllerRef.current!;
+        if (!ctrl.start(ids)) return;
+        dragStartPointerRef.current = { x: e.clientX, y: e.clientY };
+        setGroupDrag({
+          tileIds: ids,
+          deltaX: 0,
+          deltaY: 0,
+          committedDcol: 0,
+          committedDrow: 0,
+        });
+        e.stopPropagation();
+        return;
+      }
+
+      // Single tile drag.
       const ctrl = dragControllerRef.current!;
       if (!ctrl.start(tile.id)) return;
       dragStartPointerRef.current = { x: e.clientX, y: e.clientY };
@@ -209,13 +290,14 @@ export function GriddleGrid(props: GriddleGridProps) {
       });
       e.stopPropagation();
     },
-    [config, viewport],
+    [config, viewport, selection, setSelection],
   );
 
   const onPointerMove = useCallback(
     (e: PointerEvent) => {
       const pd = pinDragRef.current;
       const d = dragRef.current;
+      const gd = groupDragRef.current;
       const r = resizeRef.current;
       if (pd) {
         const dx = e.clientX - pd.startPointerX;
@@ -226,6 +308,20 @@ export function GriddleGrid(props: GriddleGridProps) {
         };
         const newPin = pixelsToPin(newPinPx, config);
         api.grid.setTilePinned(pd.tileId, newPin);
+      }
+      if (gd) {
+        const dx = e.clientX - dragStartPointerRef.current.x;
+        const dy = e.clientY - dragStartPointerRef.current.y;
+        const dcol = Math.round(dx / colSize);
+        const drow = Math.round(dy / rowSize);
+        const result = groupDragControllerRef.current!.update({ dcol, drow });
+        setGroupDrag({
+          ...gd,
+          deltaX: dx,
+          deltaY: dy,
+          committedDcol: result.indicatorDelta?.dcol ?? gd.committedDcol,
+          committedDrow: result.indicatorDelta?.drow ?? gd.committedDrow,
+        });
       }
       if (d) {
         const dx = e.clientX - dragStartPointerRef.current.x;
@@ -269,9 +365,14 @@ export function GriddleGrid(props: GriddleGridProps) {
   const onPointerUp = useCallback(() => {
     const pd = pinDragRef.current;
     const d = dragRef.current;
+    const gd = groupDragRef.current;
     const r = resizeRef.current;
     if (pd) {
       setPinDrag(null);
+    }
+    if (gd) {
+      groupDragControllerRef.current!.end();
+      setGroupDrag(null);
     }
     if (d) {
       dragControllerRef.current!.end();
@@ -301,6 +402,27 @@ export function GriddleGrid(props: GriddleGridProps) {
       window.removeEventListener('pointercancel', onPointerUp);
     };
   }, [onPointerMove, onPointerUp]);
+
+  // Escape key clears selection.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelection(new Set());
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [setSelection]);
+
+  // Click on empty space clears selection.
+  const onBackgroundPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      // Only fire if the click target is the grid background itself, not a tile.
+      if ((e.target as HTMLElement).closest('[data-griddle-tile]')) return;
+      setSelection(new Set());
+    },
+    [setSelection],
+  );
 
   const onResizeHandleDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>, tile: Tile, corner: Corner) => {
@@ -339,6 +461,10 @@ export function GriddleGrid(props: GriddleGridProps) {
   // Compute layouts for all rendered tiles in one pass so resolveStickyStacking
   // can see every sticky tile and adjust them as a group. Recomputes whenever
   // the relevant inputs change.
+  const groupDragSet = useMemo(
+    () => new Set(groupDrag?.tileIds ?? []),
+    [groupDrag?.tileIds],
+  );
   const tileLayouts = useMemo(() => {
     const out = new Map<string, TileLayout>();
     const stickyEntries: { tile: Tile; layout: TileLayout }[] = [];
@@ -365,6 +491,19 @@ export function GriddleGrid(props: GriddleGridProps) {
           zIndex: 20,
           effective: 'static',
         };
+      } else if (groupDrag && groupDragSet.has(tile.id)) {
+        const pickup = groupDragControllerRef.current!.pickupCell(tile.id);
+        const left = pickup ? pickup.col * colSize : tile.col * colSize;
+        const top = pickup ? pickup.row * rowSize : tile.row * rowSize;
+        layout = {
+          left,
+          top,
+          width: tile.w * config.unitWidth + (tile.w - 1) * (config.gap ?? 0),
+          height: tile.h * config.unitHeight + (tile.h - 1) * (config.gap ?? 0),
+          transform: `translate(${groupDrag.deltaX}px, ${groupDrag.deltaY}px)`,
+          zIndex: 20,
+          effective: 'static',
+        };
       } else {
         layout = computeTileLayout({
           tile,
@@ -382,7 +521,7 @@ export function GriddleGrid(props: GriddleGridProps) {
     }
     if (stickyEntries.length > 1) resolveStickyStacking(stickyEntries);
     return out;
-  }, [rendered, drag, resize, config, viewport, colSize, rowSize]);
+  }, [rendered, drag, groupDrag, groupDragSet, resize, config, viewport, colSize, rowSize]);
 
   // Drop indicator rect (snapped to candidate cell, sized to dragger).
   let indicatorRect: { left: number; top: number; width: number; height: number } | null = null;
@@ -402,6 +541,7 @@ export function GriddleGrid(props: GriddleGridProps) {
     <div
       ref={scrollRef}
       className={className}
+      onPointerDown={onBackgroundPointerDown}
       style={{
         position: 'relative',
         overflow: 'auto',
@@ -442,8 +582,10 @@ export function GriddleGrid(props: GriddleGridProps) {
         )}
         {rendered.map((tile) => {
           const isDragging = drag?.tileId === tile.id;
+          const isGroupDragging = groupDragSet.has(tile.id);
           const isPinDragging = pinDrag?.tileId === tile.id;
           const isResizing = resize?.tileId === tile.id;
+          const isSelected = selection.has(tile.id);
           const tileHandles = tile.resizeHandles ?? handles;
 
           const layout = tileLayouts.get(tile.id) ?? {
@@ -456,7 +598,7 @@ export function GriddleGrid(props: GriddleGridProps) {
           const transform = layout.transform;
           const zIndex = layout.zIndex;
 
-          const lifted = isDragging || isPinDragging;
+          const lifted = isDragging || isPinDragging || (isGroupDragging && groupDrag !== null);
           const tileStyle: CSSProperties = {
             position: 'absolute',
             left,
@@ -472,6 +614,10 @@ export function GriddleGrid(props: GriddleGridProps) {
             transform,
             filter: lifted ? 'drop-shadow(0 8px 16px rgba(0,0,0,0.18))' : undefined,
             transition: lifted ? 'filter 120ms ease-out, opacity 120ms ease-out' : undefined,
+            boxShadow: isSelected
+              ? '0 0 0 3px rgba(59, 91, 219, 0.85), inset 0 0 0 1px rgba(59, 91, 219, 0.3)'
+              : undefined,
+            borderRadius: config.tileRadius ?? 4,
           };
 
           return (
@@ -485,7 +631,7 @@ export function GriddleGrid(props: GriddleGridProps) {
               onPointerDown={(e) => onTilePointerDown(e, tile)}
               style={tileStyle}
             >
-              {renderTile(tile)}
+              {renderTile(tile, isSelected)}
               {tile.resizable !== false &&
                 tileHandles.map((c) => (
                   <div

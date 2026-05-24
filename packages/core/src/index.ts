@@ -41,6 +41,7 @@ export {
 } from './virtualize.js';
 export { Emitter } from './events.js';
 export { DragController, type DragUpdateResult } from './drag.js';
+export { GroupDragController, type GroupDragUpdateResult } from './group-drag.js';
 export {
   isInFlow,
   isOutOfFlow,
