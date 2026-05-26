@@ -2,7 +2,7 @@
   <div style="display:flex;height:100%">
     <ConfigPanel :api="api" :selected-tile-id="selectedTileId" @add="handleAdd" @select-tile="(id) => selectedTileId = id" />
     <div style="flex:1;background:#eef1f5;position:relative">
-      <GriddleGrid :api="api">
+      <GriddleGrid :api="api" @draw-create="handleDrawCreate">
         <template #tile="{ tile }">
           <DemoTile
             :tile="tile"
@@ -65,6 +65,10 @@ function handleAdd(w: number, h: number) {
     }
   }
   api.addTile({ id: String(nextId++), col: 0, row: 0, w, h });
+}
+function handleDrawCreate(rect: { col: number; row: number; w: number; h: number }) {
+  const id = String(nextId++);
+  api.grid.addTileWithDisplacement({ id, ...rect });
 }
 function handleRemove(id: string) {
   if (selectedTileId.value === id) selectedTileId.value = '';

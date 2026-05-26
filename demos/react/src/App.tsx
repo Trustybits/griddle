@@ -54,6 +54,11 @@ export function App() {
 
   const handleRemove = (id: string) => api.removeTile(id);
 
+  const handleDrawCreate = (rect: { col: number; row: number; w: number; h: number }) => {
+    const id = String(nextIdRef.current++);
+    api.grid.addTileWithDisplacement({ id, ...rect });
+  };
+
   return (
     <div style={{ display: 'flex', height: '100%' }}>
       <ConfigPanel api={api} onAddTile={handleAdd} nextId={() => String(nextIdRef.current++)} />
@@ -61,6 +66,7 @@ export function App() {
         <GriddleGrid
           api={api}
           renderTile={(t, _selected) => <DemoTile tile={t} onRemove={handleRemove} />}
+          onDrawCreate={handleDrawCreate}
         />
       </div>
     </div>

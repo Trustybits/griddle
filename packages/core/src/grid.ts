@@ -134,6 +134,62 @@ export class Grid {
     }
   }
 
+  /**
+   * Add a tile, displacing any overlapping tiles using the same push logic as
+   * `resizeTile`. Returns false (and leaves the grid unchanged) if the rect is
+   * out of bounds or any victim cannot be placed.
+   */
+  addTileWithDisplacement(tile: Tile): boolean {
+    if (this.tilesById.has(tile.id)) {
+      throw new Error(`Griddle: duplicate tile id "${tile.id}"`);
+    }
+    const newRect: CellRect = { col: tile.col, row: tile.row, w: tile.w, h: tile.h };
+    if (!this.rectInBounds(newRect)) return false;
+
+    const snapshot = this.snapshotTiles();
+    this.tilesById.set(tile.id, { ...tile });
+
+    const overlapping = this.tilesIn(newRect, new Set([tile.id]));
+    for (const victim of overlapping) {
+      const pDirs = priorityDirections(newRect, tileRect(victim));
+      const steps = pDirs.map(directionStep);
+      let placed = false;
+
+      for (const step of steps) {
+        if (step.dx === 0 && step.dy === 0) continue;
+        let cursor: CellPos = { col: victim.col, row: victim.row };
+        for (let k = 0; k < 128 && !placed; k++) {
+          cursor = { col: cursor.col + step.dx, row: cursor.row + step.dy };
+          const rect: CellRect = { col: cursor.col, row: cursor.row, w: victim.w, h: victim.h };
+          if (!this.rectInBounds(rect)) break;
+          const blocked = this.tilesIn(rect, new Set([victim.id, tile.id]));
+          if (blocked.length === 0 && !rectsOverlap(rect, newRect)) {
+            this._setTilePos(victim.id, cursor);
+            placed = true;
+          }
+        }
+        if (placed) break;
+      }
+
+      if (!placed) {
+        const fallback = findNearestFreeCell(this, victim, newRect, tile.id);
+        if (fallback) {
+          this._setTilePos(victim.id, fallback);
+          placed = true;
+        }
+      }
+
+      if (!placed) {
+        this.restoreTiles(snapshot);
+        return false;
+      }
+    }
+
+    this.changes.emit({ type: 'add', tileIds: [tile.id] });
+    if (this.config.gravity && this.config.gravity !== 'none') this.compactAll();
+    return true;
+  }
+
   removeTile(id: string): void {
     if (!this.tilesById.has(id)) return;
     this.tilesById.delete(id);

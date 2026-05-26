@@ -24,6 +24,30 @@
         }"
       ></div>
       <div
+        v-if="drawGhostRect"
+        class="griddle-draw-ghost"
+        :style="{
+          position: 'absolute',
+          left: drawGhostRect.left + 'px',
+          top: drawGhostRect.top + 'px',
+          width: drawGhostRect.width + 'px',
+          height: drawGhostRect.height + 'px',
+          boxSizing: 'border-box',
+          border: '2px dashed rgba(59, 91, 219, 0.55)',
+          background: 'rgba(59, 91, 219, 0.08)',
+          borderRadius: (config.tileRadius ?? 4) + 'px',
+          pointerEvents: 'none',
+          zIndex: 5,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '14px',
+          fontWeight: '600',
+          color: 'rgba(59, 91, 219, 0.8)',
+          userSelect: 'none',
+        }"
+      >{{ drawGhostRect.label }}</div>
+      <div
         v-for="tile in rendered"
         :key="tile.id"
         :data-griddle-tile="tile.id"
@@ -79,6 +103,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'selectionChange', selection: Set<string>): void;
+  (e: 'drawCreate', rect: { col: number; row: number; w: number; h: number }): void;
 }>();
 
 const scrollEl = ref<HTMLDivElement | null>(null);
@@ -177,6 +202,14 @@ interface ResizeState {
 }
 const resize = ref<ResizeState | null>(null);
 
+interface DrawState {
+  anchorCol: number;
+  anchorRow: number;
+  currentCol: number;
+  currentRow: number;
+}
+const drawState = ref<DrawState | null>(null);
+
 function onTilePointerDown(e: PointerEvent, tile: Tile) {
   if (tile.draggable === false) return;
   if ((e.target as HTMLElement).dataset.griddleHandle) return;
@@ -268,6 +301,16 @@ function onTilePointerDown(e: PointerEvent, tile: Tile) {
 function onBackgroundPointerDown(e: PointerEvent) {
   if ((e.target as HTMLElement).closest('[data-griddle-tile]')) return;
   setSelection(new Set());
+
+  const el = scrollEl.value;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const x = e.clientX - rect.left + el.scrollLeft;
+  const y = e.clientY - rect.top + el.scrollTop;
+  const col = Math.floor(x / colSize.value);
+  const row = Math.floor(y / rowSize.value);
+  drawState.value = { anchorCol: col, anchorRow: row, currentCol: col, currentRow: row };
+  (el as HTMLDivElement).setPointerCapture(e.pointerId);
 }
 
 function onResizeHandleDown(e: PointerEvent, tile: Tile, c: Corner) {
@@ -291,6 +334,18 @@ function onResizeHandleDown(e: PointerEvent, tile: Tile, c: Corner) {
 }
 
 function onPointerMove(e: PointerEvent) {
+  if (drawState.value) {
+    const el = scrollEl.value;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left + el.scrollLeft;
+      const y = e.clientY - rect.top + el.scrollTop;
+      const col = Math.max(0, Math.floor(x / colSize.value));
+      const row = Math.max(0, Math.floor(y / rowSize.value));
+      drawState.value = { ...drawState.value, currentCol: col, currentRow: row };
+    }
+    return;
+  }
   const pd = pinDrag.value;
   const gd = groupDrag.value;
   const d = drag.value;
@@ -359,6 +414,16 @@ function syncTiles() {
 }
 
 function onPointerUp() {
+  if (drawState.value) {
+    const ds = drawState.value;
+    const col = Math.min(ds.anchorCol, ds.currentCol);
+    const row = Math.min(ds.anchorRow, ds.currentRow);
+    const w = Math.max(1, Math.abs(ds.currentCol - ds.anchorCol) + 1);
+    const h = Math.max(1, Math.abs(ds.currentRow - ds.anchorRow) + 1);
+    drawState.value = null;
+    emit('drawCreate', { col, row, w, h });
+    return;
+  }
   if (pinDrag.value) {
     pinDrag.value = null;
   }
@@ -567,6 +632,22 @@ const indicatorRect = computed(() => {
     top: d.indicatorRow * rowSize.value,
     width: t.w * config.value.unitWidth + (t.w - 1) * (config.value.gap ?? 0),
     height: t.h * config.value.unitHeight + (t.h - 1) * (config.value.gap ?? 0),
+  };
+});
+
+const drawGhostRect = computed(() => {
+  const ds = drawState.value;
+  if (!ds) return null;
+  const col = Math.min(ds.anchorCol, ds.currentCol);
+  const row = Math.min(ds.anchorRow, ds.currentRow);
+  const w = Math.max(1, Math.abs(ds.currentCol - ds.anchorCol) + 1);
+  const h = Math.max(1, Math.abs(ds.currentRow - ds.anchorRow) + 1);
+  return {
+    left: col * colSize.value,
+    top: row * rowSize.value,
+    width: w * config.value.unitWidth + (w - 1) * (config.value.gap ?? 0),
+    height: h * config.value.unitHeight + (h - 1) * (config.value.gap ?? 0),
+    label: `${w}×${h}`,
   };
 });
 

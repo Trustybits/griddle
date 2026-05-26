@@ -47,6 +47,8 @@ export interface GriddleGridProps {
   selection?: Set<string>;
   /** Called whenever the selection changes. */
   onSelectionChange?: (selection: Set<string>) => void;
+  /** Called when the user draw-creates a new tile rect on empty space. */
+  onDrawCreate?: (rect: { col: number; row: number; w: number; h: number }) => void;
 }
 
 interface DragVisual {
@@ -91,10 +93,17 @@ interface ResizeState {
   previewRow: number;
 }
 
+interface DrawState {
+  anchorCol: number;
+  anchorRow: number;
+  currentCol: number;
+  currentRow: number;
+}
+
 export function GriddleGrid(props: GriddleGridProps) {
   const {
     api, renderTile, className, style, height = '100%', showGrid = true,
-    selection: controlledSelection, onSelectionChange,
+    selection: controlledSelection, onSelectionChange, onDrawCreate,
   } = props;
   const config = api.config;
   const version = useGridVersion(api.grid);
@@ -164,6 +173,10 @@ export function GriddleGrid(props: GriddleGridProps) {
   resizeRef.current = resize;
   pinDragRef.current = pinDrag;
   const dragStartPointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const [drawState, setDrawState] = useState<DrawState | null>(null);
+  const drawStateRef = useRef<DrawState | null>(null);
+  drawStateRef.current = drawState;
 
   // FLIP animation state: previousRects by id. Skip the dragger during drag —
   // it has its own cursor-driven inline transform.
@@ -295,6 +308,18 @@ export function GriddleGrid(props: GriddleGridProps) {
 
   const onPointerMove = useCallback(
     (e: PointerEvent) => {
+      if (drawStateRef.current) {
+        const el = scrollRef.current;
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const x = e.clientX - rect.left + el.scrollLeft;
+          const y = e.clientY - rect.top + el.scrollTop;
+          const col = Math.max(0, Math.floor(x / colSize));
+          const row = Math.max(0, Math.floor(y / rowSize));
+          setDrawState({ ...drawStateRef.current, currentCol: col, currentRow: row });
+        }
+        return;
+      }
       const pd = pinDragRef.current;
       const d = dragRef.current;
       const gd = groupDragRef.current;
@@ -362,7 +387,20 @@ export function GriddleGrid(props: GriddleGridProps) {
     [colSize, rowSize, api, config],
   );
 
+  const onDrawCreateRef = useRef(onDrawCreate);
+  onDrawCreateRef.current = onDrawCreate;
+
   const onPointerUp = useCallback(() => {
+    if (drawStateRef.current) {
+      const ds = drawStateRef.current;
+      const col = Math.min(ds.anchorCol, ds.currentCol);
+      const row = Math.min(ds.anchorRow, ds.currentRow);
+      const w = Math.max(1, Math.abs(ds.currentCol - ds.anchorCol) + 1);
+      const h = Math.max(1, Math.abs(ds.currentRow - ds.anchorRow) + 1);
+      setDrawState(null);
+      onDrawCreateRef.current?.({ col, row, w, h });
+      return;
+    }
     const pd = pinDragRef.current;
     const d = dragRef.current;
     const gd = groupDragRef.current;
@@ -414,14 +452,23 @@ export function GriddleGrid(props: GriddleGridProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [setSelection]);
 
-  // Click on empty space clears selection.
+  // Click on empty space clears selection and starts draw-to-create.
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      // Only fire if the click target is the grid background itself, not a tile.
       if ((e.target as HTMLElement).closest('[data-griddle-tile]')) return;
       setSelection(new Set());
+
+      const el = scrollRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left + el.scrollLeft;
+      const y = e.clientY - rect.top + el.scrollTop;
+      const col = Math.floor(x / colSize);
+      const row = Math.floor(y / rowSize);
+      setDrawState({ anchorCol: col, anchorRow: row, currentCol: col, currentRow: row });
+      el.setPointerCapture(e.pointerId);
     },
-    [setSelection],
+    [setSelection, colSize, rowSize],
   );
 
   const onResizeHandleDown = useCallback(
@@ -537,6 +584,22 @@ export function GriddleGrid(props: GriddleGridProps) {
     }
   }
 
+  // Draw-to-create ghost rect.
+  let drawGhost: { left: number; top: number; width: number; height: number; label: string } | null = null;
+  if (drawState) {
+    const col = Math.min(drawState.anchorCol, drawState.currentCol);
+    const row = Math.min(drawState.anchorRow, drawState.currentRow);
+    const w = Math.max(1, Math.abs(drawState.currentCol - drawState.anchorCol) + 1);
+    const h = Math.max(1, Math.abs(drawState.currentRow - drawState.anchorRow) + 1);
+    drawGhost = {
+      left: col * colSize,
+      top: row * rowSize,
+      width: w * config.unitWidth + (w - 1) * (config.gap ?? 0),
+      height: h * config.unitHeight + (h - 1) * (config.gap ?? 0),
+      label: `${w}\u00d7${h}`,
+    };
+  }
+
   return (
     <div
       ref={scrollRef}
@@ -579,6 +642,32 @@ export function GriddleGrid(props: GriddleGridProps) {
               zIndex: 5,
             }}
           />
+        )}
+        {drawGhost && (
+          <div
+            style={{
+              position: 'absolute',
+              left: drawGhost.left,
+              top: drawGhost.top,
+              width: drawGhost.width,
+              height: drawGhost.height,
+              boxSizing: 'border-box',
+              border: '2px dashed rgba(59, 91, 219, 0.55)',
+              background: 'rgba(59, 91, 219, 0.08)',
+              borderRadius: config.tileRadius ?? 4,
+              pointerEvents: 'none',
+              zIndex: 5,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 14,
+              fontWeight: 600,
+              color: 'rgba(59, 91, 219, 0.8)',
+              userSelect: 'none',
+            }}
+          >
+            {drawGhost.label}
+          </div>
         )}
         {rendered.map((tile) => {
           const isDragging = drag?.tileId === tile.id;
