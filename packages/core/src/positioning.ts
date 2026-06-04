@@ -135,10 +135,12 @@ export interface TileLayout {
  */
 export function computeTileLayout(input: TileLayoutInput): TileLayout {
   const { tile, config, scrollX, scrollY, viewportWidth, viewportHeight } = input;
-  const colSize = config.unitWidth + (config.gap ?? 0);
-  const rowSize = config.unitHeight + (config.gap ?? 0);
-  const width = tile.w * config.unitWidth + (tile.w - 1) * (config.gap ?? 0);
-  const height = tile.h * config.unitHeight + (tile.h - 1) * (config.gap ?? 0);
+  const gap = config.gap ?? 0;
+  const halfGap = gap / 2;
+  const colSize = config.unitWidth + gap;
+  const rowSize = config.unitHeight + gap;
+  const width = tile.w * config.unitWidth + (tile.w - 1) * gap;
+  const height = tile.h * config.unitHeight + (tile.h - 1) * gap;
   const enabled = config.enablePositioning ?? false;
   const pos = enabled ? (tile.position ?? 'static') : 'static';
 
@@ -147,9 +149,6 @@ export function computeTileLayout(input: TileLayoutInput): TileLayout {
     return { left: px.x, top: px.y, width, height, zIndex: 30, effective: 'absolute' };
   }
   if (pos === 'fixed') {
-    // "Fixed" within the grid widget: pinned coords are relative to the
-    // visible viewport, not the scroll content. Add scroll offset so the
-    // tile appears pinned to the same viewport spot as the content scrolls.
     const px = pinnedToPixels(tile.pinned ?? { x: 0, y: 0 }, config);
     return {
       left: px.x + scrollX,
@@ -163,8 +162,8 @@ export function computeTileLayout(input: TileLayoutInput): TileLayout {
   if (pos === 'sticky') {
     const sticky = tile.sticky ?? { edge: 'top', threshold: 0 };
     const threshold = sticky.threshold ?? 0;
-    let left = tile.col * colSize;
-    let top = tile.row * rowSize;
+    let left = tile.col * colSize + halfGap;
+    let top = tile.row * rowSize + halfGap;
     if (sticky.edge === 'top') {
       const stickyTop = scrollY + threshold;
       if (top < stickyTop) top = stickyTop;
@@ -180,9 +179,9 @@ export function computeTileLayout(input: TileLayoutInput): TileLayout {
     }
     return { left, top, width, height, zIndex: 40, effective: 'sticky' };
   }
-  // static / relative
-  const baseLeft = tile.col * colSize;
-  const baseTop = tile.row * rowSize;
+  // static / relative — tile is centered in its cell with halfGap inset
+  const baseLeft = tile.col * colSize + halfGap;
+  const baseTop = tile.row * rowSize + halfGap;
   if (pos === 'relative' && tile.offset) {
     const off = offsetToPixels(tile.offset, config);
     return {

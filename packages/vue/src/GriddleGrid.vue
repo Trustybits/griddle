@@ -110,8 +110,10 @@ const scrollEl = ref<HTMLDivElement | null>(null);
 const viewport = ref({ scrollX: 0, scrollY: 0, width: 1000, height: 800 });
 
 const config = computed(() => props.api.config.value);
-const colSize = computed(() => config.value.unitWidth + (config.value.gap ?? 0));
-const rowSize = computed(() => config.value.unitHeight + (config.value.gap ?? 0));
+const gap = computed(() => config.value.gap ?? 0);
+const halfGap = computed(() => gap.value / 2);
+const colSize = computed(() => config.value.unitWidth + gap.value);
+const rowSize = computed(() => config.value.unitHeight + gap.value);
 
 const range = computed(() => visibleRange(config.value, viewport.value, 4));
 const rendered = computed(() => visibleTiles(props.api.tiles.value, range.value));
@@ -501,8 +503,8 @@ watch(() => props.api.version.value, async () => {
   const draggerId = drag.value?.tileId ?? null;
   const gdSet = groupDragSet.value;
   for (const t of props.api.tiles.value) {
-    const x = t.col * colSize.value;
-    const y = t.row * rowSize.value;
+    const x = t.col * colSize.value + halfGap.value;
+    const y = t.row * rowSize.value + halfGap.value;
     if (t.id === draggerId || gdSet.has(t.id)) {
       prevRects.set(t.id, { x, y });
       continue;
@@ -539,33 +541,33 @@ const tileLayouts = computed(() => {
       const w = resize.value.previewW;
       const h = resize.value.previewH;
       layout = {
-        left: resize.value.previewCol * colSize.value,
-        top: resize.value.previewRow * rowSize.value,
-        width: w * config.value.unitWidth + (w - 1) * (config.value.gap ?? 0),
-        height: h * config.value.unitHeight + (h - 1) * (config.value.gap ?? 0),
+        left: resize.value.previewCol * colSize.value + halfGap.value,
+        top: resize.value.previewRow * rowSize.value + halfGap.value,
+        width: w * config.value.unitWidth + (w - 1) * gap.value,
+        height: h * config.value.unitHeight + (h - 1) * gap.value,
         zIndex: 10,
         effective: 'static',
       };
     } else if (drag.value?.tileId === tile.id) {
       const d = drag.value;
       layout = {
-        left: d.pickupCol * colSize.value,
-        top: d.pickupRow * rowSize.value,
-        width: tile.w * config.value.unitWidth + (tile.w - 1) * (config.value.gap ?? 0),
-        height: tile.h * config.value.unitHeight + (tile.h - 1) * (config.value.gap ?? 0),
+        left: d.pickupCol * colSize.value + halfGap.value,
+        top: d.pickupRow * rowSize.value + halfGap.value,
+        width: tile.w * config.value.unitWidth + (tile.w - 1) * gap.value,
+        height: tile.h * config.value.unitHeight + (tile.h - 1) * gap.value,
         transform: `translate(${d.deltaX}px, ${d.deltaY}px)`,
         zIndex: 20,
         effective: 'static',
       };
     } else if (gd && gdIds.has(tile.id)) {
       const pickup = groupDragController.pickupCell(tile.id);
-      const left = pickup ? pickup.col * colSize.value : tile.col * colSize.value;
-      const top = pickup ? pickup.row * rowSize.value : tile.row * rowSize.value;
+      const left = (pickup ? pickup.col * colSize.value : tile.col * colSize.value) + halfGap.value;
+      const top = (pickup ? pickup.row * rowSize.value : tile.row * rowSize.value) + halfGap.value;
       layout = {
         left,
         top,
-        width: tile.w * config.value.unitWidth + (tile.w - 1) * (config.value.gap ?? 0),
-        height: tile.h * config.value.unitHeight + (tile.h - 1) * (config.value.gap ?? 0),
+        width: tile.w * config.value.unitWidth + (tile.w - 1) * gap.value,
+        height: tile.h * config.value.unitHeight + (tile.h - 1) * gap.value,
         transform: `translate(${gd.deltaX}px, ${gd.deltaY}px)`,
         zIndex: 20,
         effective: 'static',
@@ -628,10 +630,10 @@ const indicatorRect = computed(() => {
   const t = props.api.grid.getTile(d.tileId);
   if (!t) return null;
   return {
-    left: d.indicatorCol * colSize.value,
-    top: d.indicatorRow * rowSize.value,
-    width: t.w * config.value.unitWidth + (t.w - 1) * (config.value.gap ?? 0),
-    height: t.h * config.value.unitHeight + (t.h - 1) * (config.value.gap ?? 0),
+    left: d.indicatorCol * colSize.value + halfGap.value,
+    top: d.indicatorRow * rowSize.value + halfGap.value,
+    width: t.w * config.value.unitWidth + (t.w - 1) * gap.value,
+    height: t.h * config.value.unitHeight + (t.h - 1) * gap.value,
   };
 });
 
@@ -643,10 +645,10 @@ const drawGhostRect = computed(() => {
   const w = Math.max(1, Math.abs(ds.currentCol - ds.anchorCol) + 1);
   const h = Math.max(1, Math.abs(ds.currentRow - ds.anchorRow) + 1);
   return {
-    left: col * colSize.value,
-    top: row * rowSize.value,
-    width: w * config.value.unitWidth + (w - 1) * (config.value.gap ?? 0),
-    height: h * config.value.unitHeight + (h - 1) * (config.value.gap ?? 0),
+    left: col * colSize.value + halfGap.value,
+    top: row * rowSize.value + halfGap.value,
+    width: w * config.value.unitWidth + (w - 1) * gap.value,
+    height: h * config.value.unitHeight + (h - 1) * gap.value,
     label: `${w}×${h}`,
   };
 });

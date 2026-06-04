@@ -148,8 +148,10 @@ export function GriddleGrid(props: GriddleGridProps) {
   const rendered = useMemo(() => visibleTiles(tiles, range), [tiles, range]);
   const contentSize = useMemo(() => gridContentSize(config, tiles), [config, tiles]);
 
-  const colSize = config.unitWidth + (config.gap ?? 0);
-  const rowSize = config.unitHeight + (config.gap ?? 0);
+  const gap = config.gap ?? 0;
+  const halfGap = gap / 2;
+  const colSize = config.unitWidth + gap;
+  const rowSize = config.unitHeight + gap;
 
   // Drag controller (lives across drags) + ephemeral visual state
   const dragControllerRef = useRef<DragController | null>(null);
@@ -189,10 +191,10 @@ export function GriddleGrid(props: GriddleGridProps) {
     const draggerId = dragRef.current?.tileId ?? null;
     const groupDragIds = new Set(groupDragRef.current?.tileIds ?? []);
     for (const t of tiles) {
-      const x = t.col * colSize;
-      const y = t.row * rowSize;
-      const w = t.w * config.unitWidth + (t.w - 1) * (config.gap ?? 0);
-      const h = t.h * config.unitHeight + (t.h - 1) * (config.gap ?? 0);
+      const x = t.col * colSize + halfGap;
+      const y = t.row * rowSize + halfGap;
+      const w = t.w * config.unitWidth + (t.w - 1) * gap;
+      const h = t.h * config.unitHeight + (t.h - 1) * gap;
       next.set(t.id, { x, y, w, h });
       if (t.id === draggerId || groupDragIds.has(t.id)) continue;
       const p = prev.get(t.id);
@@ -521,32 +523,32 @@ export function GriddleGrid(props: GriddleGridProps) {
         const w = resize.previewW;
         const h = resize.previewH;
         layout = {
-          left: resize.previewCol * colSize,
-          top: resize.previewRow * rowSize,
-          width: w * config.unitWidth + (w - 1) * (config.gap ?? 0),
-          height: h * config.unitHeight + (h - 1) * (config.gap ?? 0),
+          left: resize.previewCol * colSize + halfGap,
+          top: resize.previewRow * rowSize + halfGap,
+          width: w * config.unitWidth + (w - 1) * gap,
+          height: h * config.unitHeight + (h - 1) * gap,
           zIndex: 10,
           effective: 'static',
         };
       } else if (drag?.tileId === tile.id) {
         layout = {
-          left: drag.pickupCol * colSize,
-          top: drag.pickupRow * rowSize,
-          width: tile.w * config.unitWidth + (tile.w - 1) * (config.gap ?? 0),
-          height: tile.h * config.unitHeight + (tile.h - 1) * (config.gap ?? 0),
+          left: drag.pickupCol * colSize + halfGap,
+          top: drag.pickupRow * rowSize + halfGap,
+          width: tile.w * config.unitWidth + (tile.w - 1) * gap,
+          height: tile.h * config.unitHeight + (tile.h - 1) * gap,
           transform: `translate(${drag.deltaX}px, ${drag.deltaY}px)`,
           zIndex: 20,
           effective: 'static',
         };
       } else if (groupDrag && groupDragSet.has(tile.id)) {
         const pickup = groupDragControllerRef.current!.pickupCell(tile.id);
-        const left = pickup ? pickup.col * colSize : tile.col * colSize;
-        const top = pickup ? pickup.row * rowSize : tile.row * rowSize;
+        const left = (pickup ? pickup.col * colSize : tile.col * colSize) + halfGap;
+        const top = (pickup ? pickup.row * rowSize : tile.row * rowSize) + halfGap;
         layout = {
           left,
           top,
-          width: tile.w * config.unitWidth + (tile.w - 1) * (config.gap ?? 0),
-          height: tile.h * config.unitHeight + (tile.h - 1) * (config.gap ?? 0),
+          width: tile.w * config.unitWidth + (tile.w - 1) * gap,
+          height: tile.h * config.unitHeight + (tile.h - 1) * gap,
           transform: `translate(${groupDrag.deltaX}px, ${groupDrag.deltaY}px)`,
           zIndex: 20,
           effective: 'static',
@@ -576,10 +578,10 @@ export function GriddleGrid(props: GriddleGridProps) {
     const t = api.grid.getTile(drag.tileId);
     if (t) {
       indicatorRect = {
-        left: drag.indicatorCol * colSize,
-        top: drag.indicatorRow * rowSize,
-        width: t.w * config.unitWidth + (t.w - 1) * (config.gap ?? 0),
-        height: t.h * config.unitHeight + (t.h - 1) * (config.gap ?? 0),
+        left: drag.indicatorCol * colSize + halfGap,
+        top: drag.indicatorRow * rowSize + halfGap,
+        width: t.w * config.unitWidth + (t.w - 1) * gap,
+        height: t.h * config.unitHeight + (t.h - 1) * gap,
       };
     }
   }
@@ -592,10 +594,10 @@ export function GriddleGrid(props: GriddleGridProps) {
     const w = Math.max(1, Math.abs(drawState.currentCol - drawState.anchorCol) + 1);
     const h = Math.max(1, Math.abs(drawState.currentRow - drawState.anchorRow) + 1);
     drawGhost = {
-      left: col * colSize,
-      top: row * rowSize,
-      width: w * config.unitWidth + (w - 1) * (config.gap ?? 0),
-      height: h * config.unitHeight + (h - 1) * (config.gap ?? 0),
+      left: col * colSize + halfGap,
+      top: row * rowSize + halfGap,
+      width: w * config.unitWidth + (w - 1) * gap,
+      height: h * config.unitHeight + (h - 1) * gap,
       label: `${w}\u00d7${h}`,
     };
   }

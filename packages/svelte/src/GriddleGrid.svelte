@@ -30,6 +30,7 @@
 
   $: colSize = cfg.unitWidth + (cfg.gap ?? 0);
   $: rowSize = cfg.unitHeight + (cfg.gap ?? 0);
+  $: halfGap = (cfg.gap ?? 0) / 2;
   $: range = visibleRange(cfg, viewport, 4);
   $: rendered = visibleTiles(tilesAll, range);
   $: contentSize = gridContentSize(cfg, tilesAll);
@@ -257,8 +258,8 @@
     await tick();
     const draggerId = drag?.tileId ?? null;
     for (const t of tilesAll) {
-      const x = t.col * colSize;
-      const y = t.row * rowSize;
+      const x = t.col * colSize + halfGap;
+      const y = t.row * rowSize + halfGap;
       const p = prevRects.get(t.id);
       if (t.id === draggerId) {
         // Keep prevRect synced so the post-drop FLIP doesn't double-jump.
@@ -295,8 +296,8 @@
         const w = resize.previewW;
         const h = resize.previewH;
         layout = {
-          left: resize.previewCol * colSize,
-          top: resize.previewRow * rowSize,
+          left: resize.previewCol * colSize + halfGap,
+          top: resize.previewRow * rowSize + halfGap,
           width: w * cfg.unitWidth + (w - 1) * (cfg.gap ?? 0),
           height: h * cfg.unitHeight + (h - 1) * (cfg.gap ?? 0),
           zIndex: 10,
@@ -304,8 +305,8 @@
         };
       } else if (drag?.tileId === tile.id) {
         layout = {
-          left: drag.pickupCol * colSize,
-          top: drag.pickupRow * rowSize,
+          left: drag.pickupCol * colSize + halfGap,
+          top: drag.pickupRow * rowSize + halfGap,
           width: tile.w * cfg.unitWidth + (tile.w - 1) * (cfg.gap ?? 0),
           height: tile.h * cfg.unitHeight + (tile.h - 1) * (cfg.gap ?? 0),
           transform: `translate(${drag.deltaX}px, ${drag.deltaY}px)`,
@@ -346,8 +347,8 @@
     const t = api.grid.getTile(drag.tileId);
     if (!t) return null;
     return {
-      left: drag.indicatorCol * colSize,
-      top: drag.indicatorRow * rowSize,
+      left: drag.indicatorCol * colSize + halfGap,
+      top: drag.indicatorRow * rowSize + halfGap,
       width: t.w * cfg.unitWidth + (t.w - 1) * (cfg.gap ?? 0),
       height: t.h * cfg.unitHeight + (t.h - 1) * (cfg.gap ?? 0),
     };
