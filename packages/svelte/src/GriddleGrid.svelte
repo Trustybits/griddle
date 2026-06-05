@@ -190,6 +190,10 @@
         indicatorCol: result.indicatorCell ? result.indicatorCell.col : null,
         indicatorRow: result.indicatorCell ? result.indicatorCell.row : null,
       };
+      // restoreTiles() doesn't emit change events, so force-sync the local
+      // tile list so FLIP picks up displaced tile resets (e.g. drag back to
+      // the pickup cell).
+      if (result.changed) tilesAll = api.grid.tiles;
     }
     if (resize) {
       const dx = e.clientX - resize.startPointerX;

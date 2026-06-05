@@ -385,6 +385,7 @@ function onPointerMove(e: PointerEvent) {
       committedDcol: result.indicatorDelta?.dcol ?? gd.committedDcol,
       committedDrow: result.indicatorDelta?.drow ?? gd.committedDrow,
     };
+    if (result.changed) syncTiles();
   }
   if (d) {
     const dx = e.clientX - dragStartPointerX;
@@ -399,6 +400,10 @@ function onPointerMove(e: PointerEvent) {
       indicatorCol: result.indicatorCell ? result.indicatorCell.col : null,
       indicatorRow: result.indicatorCell ? result.indicatorCell.row : null,
     };
+    // DragController.restoreTiles() doesn't emit change events, so when the
+    // candidate cell changes (especially returning to pickup), force-sync the
+    // reactive tiles ref so the FLIP animation picks up displaced tile resets.
+    if (result.changed) syncTiles();
   }
   if (r) {
     const dx = e.clientX - r.startPointerX;
