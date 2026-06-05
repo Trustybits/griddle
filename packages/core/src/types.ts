@@ -139,6 +139,18 @@ export interface GridConfig {
    * measures in cells with float precision so the offset scales with cell size.
    */
   relativeUnits?: 'pixels' | 'subcell';
+  /**
+   * CSS selector string passed to `Element.closest()` on the pointer-down
+   * target. If the target matches, the drag is suppressed so the element's
+   * native interaction (click, focus, text selection, etc.) works normally.
+   *
+   * Default: `'a, button, input, textarea, select, [contenteditable]'`
+   *
+   * Set to `''` to disable (entire tile surface starts a drag). Consumers
+   * can extend the default with app-specific selectors, e.g.
+   * `'a, button, input, textarea, select, [contenteditable], .my-caption'`.
+   */
+  dragIgnoreFrom?: string;
 }
 
 /** A rectangle in cells (inclusive col,row; exclusive col+w,row+h). */

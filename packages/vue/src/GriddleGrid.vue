@@ -104,6 +104,10 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'selectionChange', selection: Set<string>): void;
   (e: 'drawCreate', rect: { col: number; row: number; w: number; h: number }): void;
+  (e: 'dragStart', tileId: string): void;
+  (e: 'dragEnd', tileId: string, committed: boolean): void;
+  (e: 'resizeStart', tileId: string): void;
+  (e: 'resizeEnd', tileId: string, committed: boolean): void;
 }>();
 
 const scrollEl = ref<HTMLDivElement | null>(null);
@@ -154,6 +158,8 @@ function setSelection(next: Set<string>) {
   if (!props.selection) internalSelection.value = next;
   emit('selectionChange', next);
 }
+
+const DEFAULT_DRAG_IGNORE = 'a, button, input, textarea, select, [contenteditable]';
 
 const dragController = new DragController(props.api.grid);
 const groupDragController = new GroupDragController(props.api.grid);
@@ -216,6 +222,9 @@ function onTilePointerDown(e: PointerEvent, tile: Tile) {
   if (tile.draggable === false) return;
   if ((e.target as HTMLElement).dataset.griddleHandle) return;
 
+  const ignoreSelector = config.value.dragIgnoreFrom ?? DEFAULT_DRAG_IGNORE;
+  if (ignoreSelector && (e.target as HTMLElement).closest(ignoreSelector)) return;
+
   const metaKey = e.metaKey || e.ctrlKey;
 
   // Out-of-flow tiles get free-pixel drag (no selection).
@@ -239,6 +248,7 @@ function onTilePointerDown(e: PointerEvent, tile: Tile) {
       startPointerX: e.clientX,
       startPointerY: e.clientY,
     };
+    emit('dragStart', tile.id);
     e.stopPropagation();
     return;
   }
@@ -280,6 +290,7 @@ function onTilePointerDown(e: PointerEvent, tile: Tile) {
       committedDcol: 0,
       committedDrow: 0,
     };
+    emit('dragStart', tile.id);
     e.stopPropagation();
     return;
   }
@@ -297,6 +308,7 @@ function onTilePointerDown(e: PointerEvent, tile: Tile) {
     indicatorCol: tile.col,
     indicatorRow: tile.row,
   };
+  emit('dragStart', tile.id);
   e.stopPropagation();
 }
 
@@ -332,6 +344,7 @@ function onResizeHandleDown(e: PointerEvent, tile: Tile, c: Corner) {
     previewCol: tile.col,
     previewRow: tile.row,
   };
+  emit('resizeStart', tile.id);
   e.stopPropagation();
 }
 
@@ -397,8 +410,13 @@ function onPointerMove(e: PointerEvent) {
     if (r.corner === 'se' || r.corner === 'sw') dh = stepsY;
     if (r.corner === 'sw' || r.corner === 'nw') { dw = -stepsX; dcol = stepsX; }
     if (r.corner === 'ne' || r.corner === 'nw') { dh = -stepsY; drow = stepsY; }
-    const nW = Math.max(1, r.startW + dw);
-    const nH = Math.max(1, r.startH + dh);
+    const tile = props.api.grid.getTile(r.tileId);
+    const minW = tile?.minW ?? 1;
+    const minH = tile?.minH ?? 1;
+    const maxW = tile?.maxW ?? Infinity;
+    const maxH = tile?.maxH ?? Infinity;
+    const nW = Math.min(maxW, Math.max(minW, r.startW + dw));
+    const nH = Math.min(maxH, Math.max(minH, r.startH + dh));
     const nC = r.startCol + dcol;
     const nR = r.startRow + drow;
     if (nW !== r.previewW || nH !== r.previewH || nC !== r.previewCol || nR !== r.previewRow) {
@@ -427,30 +445,41 @@ function onPointerUp() {
     return;
   }
   if (pinDrag.value) {
+    const tileId = pinDrag.value.tileId;
     pinDrag.value = null;
+    emit('dragEnd', tileId, true);
   }
   if (groupDrag.value) {
-    groupDragController.end();
+    const tileIds = groupDrag.value.tileIds;
+    const { committed } = groupDragController.end();
     groupDrag.value = null;
     syncTiles();
+    if (tileIds.length > 0) emit('dragEnd', tileIds[0], committed);
   }
   if (drag.value) {
-    dragController.end();
+    const tileId = drag.value.tileId;
+    const { committed } = dragController.end();
     drag.value = null;
     syncTiles();
+    emit('dragEnd', tileId, committed);
   }
   const r = resize.value;
   if (r) {
     const t = props.api.grid.getTile(r.tileId);
+    let committed = false;
     if (t) {
       if (r.previewCol !== t.col || r.previewRow !== t.row) {
         props.api.moveTile(r.tileId, { col: r.previewCol, row: r.previewRow });
       }
       if (r.previewW !== t.w || r.previewH !== t.h) {
-        props.api.resizeTile(r.tileId, { w: r.previewW, h: r.previewH });
+        committed = props.api.resizeTile(r.tileId, { w: r.previewW, h: r.previewH });
+      } else {
+        committed = r.previewCol !== r.startCol || r.previewRow !== r.startRow
+          || r.previewW !== r.startW || r.previewH !== r.startH;
       }
     }
     resize.value = null;
+    emit('resizeEnd', r.tileId, committed);
   }
 }
 

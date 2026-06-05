@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy, tick, createEventDispatcher } from 'svelte';
   import type { Corner, Tile } from '@griddle/core';
   import {
     visibleRange,
@@ -17,6 +17,15 @@
   export let api: GriddleApi;
   export let height: number | string = '100%';
   export let showGrid = true;
+
+  const dispatch = createEventDispatcher<{
+    dragStart: { tileId: string };
+    dragEnd: { tileId: string; committed: boolean };
+    resizeStart: { tileId: string };
+    resizeEnd: { tileId: string; committed: boolean };
+  }>();
+
+  const DEFAULT_DRAG_IGNORE = 'a, button, input, textarea, select, [contenteditable]';
 
   let scrollEl: HTMLDivElement;
   let viewport = { scrollX: 0, scrollY: 0, width: 1000, height: 800 };
@@ -102,10 +111,9 @@
   function onTilePointerDown(e: PointerEvent, tile: Tile) {
     if (tile.draggable === false) return;
     if ((e.target as HTMLElement).dataset.griddleHandle) return;
+    const ignoreSelector = cfg.dragIgnoreFrom ?? DEFAULT_DRAG_IGNORE;
+    if (ignoreSelector && (e.target as HTMLElement).closest(ignoreSelector)) return;
     (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-    // Out-of-flow tiles (absolute/fixed) get free-pixel drag — they don't
-    // participate in the rules engine, so we just translate cursor deltas
-    // into pinned-coord updates.
     if (cfg.enablePositioning && isOutOfFlow(tile)) {
       const layout = computeTileLayout({
         tile,
@@ -115,8 +123,6 @@
         viewportWidth: viewport.width,
         viewportHeight: viewport.height,
       });
-      // For 'fixed', the rendered left/top includes scroll compensation; the
-      // raw pinned-pixel start is layout.left/top minus that compensation.
       const startPinPx =
         tile.position === 'fixed'
           ? { x: layout.left - viewport.scrollX, y: layout.top - viewport.scrollY }
@@ -127,6 +133,7 @@
         startPointerX: e.clientX,
         startPointerY: e.clientY,
       };
+      dispatch('dragStart', { tileId: tile.id });
       e.stopPropagation();
       return;
     }
@@ -142,6 +149,7 @@
       indicatorCol: tile.col,
       indicatorRow: tile.row,
     };
+    dispatch('dragStart', { tileId: tile.id });
     e.stopPropagation();
   }
   function onResizeHandleDown(e: PointerEvent, tile: Tile, c: Corner) {
@@ -155,6 +163,7 @@
       previewW: tile.w, previewH: tile.h,
       previewCol: tile.col, previewRow: tile.row,
     };
+    dispatch('resizeStart', { tileId: tile.id });
     e.stopPropagation();
   }
   function onPointerMove(e: PointerEvent) {
@@ -192,8 +201,13 @@
       if (resize.corner === 'se' || resize.corner === 'sw') dh = stepsY;
       if (resize.corner === 'sw' || resize.corner === 'nw') { dw = -stepsX; dcol = stepsX; }
       if (resize.corner === 'ne' || resize.corner === 'nw') { dh = -stepsY; drow = stepsY; }
-      const nW = Math.max(1, resize.startW + dw);
-      const nH = Math.max(1, resize.startH + dh);
+      const tile = api.grid.getTile(resize.tileId);
+      const minW = tile?.minW ?? 1;
+      const minH = tile?.minH ?? 1;
+      const maxW = tile?.maxW ?? Infinity;
+      const maxH = tile?.maxH ?? Infinity;
+      const nW = Math.min(maxW, Math.max(minW, resize.startW + dw));
+      const nH = Math.min(maxH, Math.max(minH, resize.startH + dh));
       const nC = resize.startCol + dcol;
       const nR = resize.startRow + drow;
       if (nW !== resize.previewW || nH !== resize.previewH || nC !== resize.previewCol || nR !== resize.previewRow) {
@@ -203,23 +217,33 @@
   }
   function onPointerUp() {
     if (pinDrag) {
+      const tileId = pinDrag.tileId;
       pinDrag = null;
+      dispatch('dragEnd', { tileId, committed: true });
     }
     if (drag) {
-      dragController.end();
+      const tileId = drag.tileId;
+      const { committed } = dragController.end();
       drag = null;
+      dispatch('dragEnd', { tileId, committed });
     }
     if (resize) {
-      const t = api.grid.getTile(resize.tileId);
+      const r = resize;
+      const t = api.grid.getTile(r.tileId);
+      let committed = false;
       if (t) {
-        if (resize.previewCol !== t.col || resize.previewRow !== t.row) {
-          api.moveTile(resize.tileId, { col: resize.previewCol, row: resize.previewRow });
+        if (r.previewCol !== t.col || r.previewRow !== t.row) {
+          api.moveTile(r.tileId, { col: r.previewCol, row: r.previewRow });
         }
-        if (resize.previewW !== t.w || resize.previewH !== t.h) {
-          api.resizeTile(resize.tileId, { w: resize.previewW, h: resize.previewH });
+        if (r.previewW !== t.w || r.previewH !== t.h) {
+          committed = api.resizeTile(r.tileId, { w: r.previewW, h: r.previewH });
+        } else {
+          committed = r.previewCol !== r.startCol || r.previewRow !== r.startRow
+            || r.previewW !== r.startW || r.previewH !== r.startH;
         }
       }
       resize = null;
+      dispatch('resizeEnd', { tileId: r.tileId, committed });
     }
   }
   function updateViewport() {

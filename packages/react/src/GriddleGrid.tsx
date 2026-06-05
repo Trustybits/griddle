@@ -49,6 +49,14 @@ export interface GriddleGridProps {
   onSelectionChange?: (selection: Set<string>) => void;
   /** Called when the user draw-creates a new tile rect on empty space. */
   onDrawCreate?: (rect: { col: number; row: number; w: number; h: number }) => void;
+  /** Called when a drag gesture begins (pointer down on a tile). */
+  onDragStart?: (tileId: string) => void;
+  /** Called when a drag gesture ends. `committed` is true if the tile moved. */
+  onDragEnd?: (tileId: string, committed: boolean) => void;
+  /** Called when a resize gesture begins (pointer down on a handle). */
+  onResizeStart?: (tileId: string) => void;
+  /** Called when a resize gesture ends. `committed` is true if the tile resized. */
+  onResizeEnd?: (tileId: string, committed: boolean) => void;
 }
 
 interface DragVisual {
@@ -100,10 +108,13 @@ interface DrawState {
   currentRow: number;
 }
 
+const DEFAULT_DRAG_IGNORE = 'a, button, input, textarea, select, [contenteditable]';
+
 export function GriddleGrid(props: GriddleGridProps) {
   const {
     api, renderTile, className, style, height = '100%', showGrid = true,
     selection: controlledSelection, onSelectionChange, onDrawCreate,
+    onDragStart, onDragEnd, onResizeStart, onResizeEnd,
   } = props;
   const config = api.config;
   const version = useGridVersion(api.grid);
@@ -180,6 +191,15 @@ export function GriddleGrid(props: GriddleGridProps) {
   const drawStateRef = useRef<DrawState | null>(null);
   drawStateRef.current = drawState;
 
+  const onDragStartRef = useRef(onDragStart);
+  onDragStartRef.current = onDragStart;
+  const onDragEndRef = useRef(onDragEnd);
+  onDragEndRef.current = onDragEnd;
+  const onResizeStartRef = useRef(onResizeStart);
+  onResizeStartRef.current = onResizeStart;
+  const onResizeEndRef = useRef(onResizeEnd);
+  onResizeEndRef.current = onResizeEnd;
+
   // FLIP animation state: previousRects by id. Skip the dragger during drag —
   // it has its own cursor-driven inline transform.
   const prevRectsRef = useRef(new Map<string, { x: number; y: number; w: number; h: number }>());
@@ -221,6 +241,9 @@ export function GriddleGrid(props: GriddleGridProps) {
       if (tile.draggable === false) return;
       if ((e.target as HTMLElement).dataset.griddleHandle) return;
 
+      const ignoreSelector = config.dragIgnoreFrom ?? DEFAULT_DRAG_IGNORE;
+      if (ignoreSelector && (e.target as HTMLElement).closest(ignoreSelector)) return;
+
       const metaKey = e.metaKey || e.ctrlKey;
 
       // Out-of-flow tiles get free-pixel drag (no selection behavior).
@@ -244,6 +267,7 @@ export function GriddleGrid(props: GriddleGridProps) {
           startPointerX: e.clientX,
           startPointerY: e.clientY,
         });
+        onDragStartRef.current?.(tile.id);
         e.stopPropagation();
         return;
       }
@@ -286,6 +310,7 @@ export function GriddleGrid(props: GriddleGridProps) {
           committedDcol: 0,
           committedDrow: 0,
         });
+        onDragStartRef.current?.(tile.id);
         e.stopPropagation();
         return;
       }
@@ -303,6 +328,7 @@ export function GriddleGrid(props: GriddleGridProps) {
         indicatorCol: tile.col,
         indicatorRow: tile.row,
       });
+      onDragStartRef.current?.(tile.id);
       e.stopPropagation();
     },
     [config, viewport, selection, setSelection],
@@ -377,8 +403,13 @@ export function GriddleGrid(props: GriddleGridProps) {
         if (r.corner === 'se' || r.corner === 'sw') dh = stepsY;
         if (r.corner === 'sw' || r.corner === 'nw') { dw = -stepsX; dcol = stepsX; }
         if (r.corner === 'ne' || r.corner === 'nw') { dh = -stepsY; drow = stepsY; }
-        const newW = Math.max(1, r.startW + dw);
-        const newH = Math.max(1, r.startH + dh);
+        const tile = api.grid.getTile(r.tileId);
+        const minW = tile?.minW ?? 1;
+        const minH = tile?.minH ?? 1;
+        const maxW = tile?.maxW ?? Infinity;
+        const maxH = tile?.maxH ?? Infinity;
+        const newW = Math.min(maxW, Math.max(minW, r.startW + dw));
+        const newH = Math.min(maxH, Math.max(minH, r.startH + dh));
         const newCol = r.startCol + dcol;
         const newRow = r.startRow + drow;
         if (newW !== r.previewW || newH !== r.previewH || newCol !== r.previewCol || newRow !== r.previewRow) {
@@ -408,27 +439,38 @@ export function GriddleGrid(props: GriddleGridProps) {
     const gd = groupDragRef.current;
     const r = resizeRef.current;
     if (pd) {
+      const tileId = pd.tileId;
       setPinDrag(null);
+      onDragEndRef.current?.(tileId, true);
     }
     if (gd) {
-      groupDragControllerRef.current!.end();
+      const primaryId = gd.tileIds[0];
+      const { committed } = groupDragControllerRef.current!.end();
       setGroupDrag(null);
+      if (primaryId) onDragEndRef.current?.(primaryId, committed);
     }
     if (d) {
-      dragControllerRef.current!.end();
+      const tileId = d.tileId;
+      const { committed } = dragControllerRef.current!.end();
       setDrag(null);
+      onDragEndRef.current?.(tileId, committed);
     }
     if (r) {
       const tile = api.grid.getTile(r.tileId);
+      let committed = false;
       if (tile) {
         if (r.previewCol !== tile.col || r.previewRow !== tile.row) {
           api.moveTile(r.tileId, { col: r.previewCol, row: r.previewRow });
         }
         if (r.previewW !== tile.w || r.previewH !== tile.h) {
-          api.resizeTile(r.tileId, { w: r.previewW, h: r.previewH });
+          committed = api.resizeTile(r.tileId, { w: r.previewW, h: r.previewH });
+        } else {
+          committed = r.previewCol !== r.startCol || r.previewRow !== r.startRow
+            || r.previewW !== r.startW || r.previewH !== r.startH;
         }
       }
       setResize(null);
+      onResizeEndRef.current?.(r.tileId, committed);
     }
   }, [api]);
 
@@ -491,6 +533,7 @@ export function GriddleGrid(props: GriddleGridProps) {
         previewCol: tile.col,
         previewRow: tile.row,
       });
+      onResizeStartRef.current?.(tile.id);
       e.stopPropagation();
     },
     [],
