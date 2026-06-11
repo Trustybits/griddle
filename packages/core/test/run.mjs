@@ -1,7 +1,22 @@
 // Handwritten test runner. No dependencies — just node.
 // Run with: node packages/core/test/run.mjs (from repo root)
 
-import { Grid, priorityDirections, rectsAdjacent, footprintEquals } from '../dist/index.js';
+import {
+  Grid,
+  priorityDirections,
+  rectsAdjacent,
+  footprintEquals,
+  wrapValue,
+  wrapCell,
+  loopPeriod,
+  loopContentPeriods,
+  loopContentSize,
+  loopAnchorScroll,
+  loopInstances,
+  nearestInstanceOrigin,
+  resolveLoop,
+  PanController,
+} from '../dist/index.js';
 
 let passed = 0;
 let failed = 0;
@@ -379,6 +394,137 @@ test('resizeTile grows and displaces neighbors', () => {
   eq(g.getTile('a').w, 2);
   const b = g.getTile('b');
   assert(!(b.col === 1 && b.row === 0));
+});
+
+// ---- Loop mode ---------------------------------------------------------
+
+test('Loop: wrapValue positive modulo', () => {
+  eq(wrapValue(5, 10), 5);
+  eq(wrapValue(15, 10), 5);
+  eq(wrapValue(-3, 10), 7);
+  eq(wrapValue(-10, 10), 0);
+  eq(wrapValue(0, 10), 0);
+});
+
+test('Loop: wrapCell wraps into base period', () => {
+  const cfg = { cols: 12, rows: 8, unitWidth: 50, unitHeight: 50 };
+  deepEq(wrapCell({ col: 13, row: -1 }, cfg), { col: 1, row: 7 });
+  deepEq(wrapCell({ col: -12, row: 8 }, cfg), { col: 0, row: 0 });
+});
+
+test('Loop: loopPeriod includes gap', () => {
+  const cfg = { cols: 10, rows: 5, unitWidth: 50, unitHeight: 40, gap: 4 };
+  deepEq(loopPeriod(cfg), { width: 10 * 54, height: 5 * 44 });
+});
+
+test('Loop: content spans >= 3 periods and >= viewport + 2 periods', () => {
+  const cfg = { cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 };
+  // period = 200px; small viewport -> 3 periods
+  deepEq(loopContentPeriods(cfg, 150, 150), { nx: 3, ny: 3 });
+  // viewport 900px > period -> ceil(900/200)+2 = 7
+  deepEq(loopContentPeriods(cfg, 900, 150), { nx: 7, ny: 3 });
+  const size = loopContentSize(cfg, 900, 150);
+  assert(size.width >= 900 + 2 * 200, 'content >= viewport + 2 periods');
+});
+
+test('Loop: loopAnchorScroll keeps scroll inside [period, 2*period)', () => {
+  eq(loopAnchorScroll(0, 200), 200);
+  eq(loopAnchorScroll(50, 200), 250);
+  eq(loopAnchorScroll(250, 200), 250);
+  eq(loopAnchorScroll(-50, 200), 350);
+  assert(loopAnchorScroll(123456.7, 200) >= 200);
+  assert(loopAnchorScroll(123456.7, 200) < 400);
+});
+
+test('Loop: loopInstances returns one copy per visible period', () => {
+  const cfg = { cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 };
+  // period 200x200. Tile at (0,0) 1x1 -> base rect [0,50)x[0,50).
+  const tiles = [{ id: 'a', col: 0, row: 0, w: 1, h: 1 }];
+  // View covering exactly the second period.
+  const one = loopInstances(cfg, tiles, { x: 200, y: 200, width: 200, height: 200 });
+  eq(one.length, 1);
+  eq(one[0].key, 'a@1,1');
+  eq(one[0].left, 200);
+  eq(one[0].top, 200);
+  // View spanning a seam horizontally -> two copies.
+  const two = loopInstances(cfg, tiles, { x: 190, y: 200, width: 220, height: 100 });
+  eq(two.length, 2);
+  const keys = two.map((i) => i.key).sort();
+  deepEq(keys, ['a@1,1', 'a@2,1']);
+});
+
+test('Loop: loopInstances skips out-of-flow tiles', () => {
+  const cfg = { cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 };
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 1, h: 1 },
+    { id: 'p', col: 0, row: 0, w: 1, h: 1, position: 'absolute', pinned: { x: 0, y: 0 } },
+  ];
+  const out = loopInstances(cfg, tiles, { x: 0, y: 0, width: 200, height: 200 });
+  eq(out.length, 1);
+  eq(out[0].tile.id, 'a');
+});
+
+test('Loop: nearestInstanceOrigin picks the copy near the point', () => {
+  const cfg = { cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 };
+  // Cell (1,1) base origin = (50,50); period 200.
+  const near = nearestInstanceOrigin(cfg, { col: 1, row: 1 }, { x: 460, y: 70 });
+  deepEq(near, { left: 450, top: 50 });
+});
+
+test('Loop: resolveLoop applies defaults', () => {
+  const off = resolveLoop({ cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 });
+  eq(off, null);
+  const pan = resolveLoop({ cols: 4, rows: 4, unitWidth: 50, unitHeight: 50, loop: { enabled: true } });
+  eq(pan.interaction, 'pan');
+  assert(pan.dragPan);
+  eq(pan.friction, 4);
+  const edit = resolveLoop({
+    cols: 4, rows: 4, unitWidth: 50, unitHeight: 50,
+    loop: { enabled: true, interaction: 'edit', physics: { friction: 7 } },
+  });
+  eq(edit.interaction, 'edit');
+  assert(!edit.dragPan, 'edit mode never drag-pans');
+  eq(edit.friction, 7);
+});
+
+test('Loop: Grid rejects loop + infinite axes', () => {
+  let threw = false;
+  try {
+    new Grid({ cols: 12, rows: Infinity, unitWidth: 50, unitHeight: 50, loop: { enabled: true } });
+  } catch {
+    threw = true;
+  }
+  assert(threw, 'constructor must reject loop with infinite rows');
+  const g = new Grid({ cols: 12, rows: 12, unitWidth: 50, unitHeight: 50 });
+  let threw2 = false;
+  try {
+    g.updateConfig({ infiniteY: true, loop: { enabled: true } });
+  } catch {
+    threw2 = true;
+  }
+  assert(threw2, 'updateConfig must reject loop with infiniteY');
+});
+
+test('Loop: PanController drag pans opposite pointer and flings on release', () => {
+  const pan = new PanController();
+  pan.dragStart(100, 100, 0);
+  pan.dragMove(60, 100, 16); // finger left 40px -> camera right
+  pan.dragEnd(16);
+  // Advance simulation 2s in 16ms steps.
+  let st;
+  for (let t = 32; t <= 2000; t += 16) st = pan.tick(t);
+  assert(st.x > 40, `camera should coast past the drag distance, got ${st.x}`);
+  assert(Math.abs(st.y) < 1e-6, 'no vertical motion');
+  assert(!st.isMoving, 'camera settles');
+});
+
+test('Loop: PanController scrollBy moves camera directly', () => {
+  const pan = new PanController();
+  pan.scrollBy(120, -30);
+  const st = pan.tick(16);
+  eq(st.x, 120);
+  eq(st.y, -30);
+  assert(!st.isDragging);
 });
 
 // ---- Report -----------------------------------------------------------

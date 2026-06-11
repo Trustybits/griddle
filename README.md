@@ -20,6 +20,7 @@ Griddle separates **logic** (placement, movement, swap/push, compaction, seriali
 - **Tile**: an object placed at `(col, row)` with a footprint of `w × h` units.
 - **Repack**: after a drag, tiles resolve collisions via Rules 1–6 (see `docs/movement.md`).
 - **Compaction** (gravity): optional backfilling of gaps toward a chosen edge.
+- **Loop**: optional infinite-gallery mode — the finite grid repeats endlessly in both axes with drag-to-pan physics or native scroll (see `docs/loop.md`).
 
 ## Quickstart (React)
 
@@ -46,6 +47,23 @@ export default function App() {
   return <GriddleGrid api={api} renderTile={(t) => <div>#{t.id}</div>} />;
 }
 ```
+
+## Loop mode (infinite gallery)
+
+```tsx
+const api = useGriddle({
+  config: {
+    cols: 12, rows: 12, unitWidth: 120, unitHeight: 120,
+    loop: { enabled: true, interaction: 'pan' }, // 'pan' = viewer, 'edit' = owner
+  },
+  tiles,
+});
+// <GriddleGrid api={api} renderTile={...} onCameraChange={(cam) => ...} />
+```
+
+The grid repeats infinitely in both directions — drag to pan with momentum
+(physics configurable), or scroll natively. In `'edit'` mode tiles stay
+drag-n-droppable and drop positions wrap across the seam. See `docs/loop.md`.
 
 ## Headless (core only)
 

@@ -151,6 +151,105 @@ export function ConfigPanel(props: {
         </div>
       </div>
 
+      <div style={heading}>Loop</div>
+      <div style={row}>
+        <span style={label}>Loop (infinite repeat)</span>
+        <input
+          type="checkbox"
+          checked={cfg.loop?.enabled === true}
+          onChange={(e) => {
+            if (e.target.checked) {
+              api.updateConfig({
+                // Loop requires a finite period on both axes.
+                cols: cfg.cols === Infinity ? 12 : cfg.cols,
+                rows: cfg.rows === Infinity ? 12 : cfg.rows,
+                infiniteX: false,
+                infiniteY: false,
+                loop: { ...cfg.loop, enabled: true },
+              });
+            } else {
+              api.updateConfig({ loop: { ...cfg.loop, enabled: false } });
+            }
+          }}
+        />
+      </div>
+      {cfg.loop?.enabled && (
+        <>
+          <div style={row}>
+            <span style={label}>Interaction</span>
+            <select
+              style={select}
+              value={cfg.loop?.interaction ?? 'pan'}
+              onChange={(e) =>
+                api.updateConfig({
+                  loop: { ...cfg.loop, enabled: true, interaction: e.target.value as 'pan' | 'edit' },
+                })
+              }
+            >
+              <option value="pan">pan (viewer)</option>
+              <option value="edit">edit (owner)</option>
+            </select>
+          </div>
+          <div style={row}>
+            <span style={label}>Friction (1/s)</span>
+            <input
+              style={input}
+              type="number"
+              min={0.5}
+              step={0.5}
+              value={cfg.loop?.physics?.friction ?? 4}
+              onChange={(e) =>
+                api.updateConfig({
+                  loop: {
+                    ...cfg.loop,
+                    enabled: true,
+                    physics: { ...cfg.loop?.physics, friction: parseFloat(e.target.value) || 4 },
+                  },
+                })
+              }
+            />
+          </div>
+          <div style={row}>
+            <span style={label}>Ease (1/s)</span>
+            <input
+              style={input}
+              type="number"
+              min={1}
+              step={1}
+              value={cfg.loop?.physics?.ease ?? 12}
+              onChange={(e) =>
+                api.updateConfig({
+                  loop: {
+                    ...cfg.loop,
+                    enabled: true,
+                    physics: { ...cfg.loop?.physics, ease: parseFloat(e.target.value) || 12 },
+                  },
+                })
+              }
+            />
+          </div>
+          <div style={row}>
+            <span style={label}>Max velocity (px/s)</span>
+            <input
+              style={input}
+              type="number"
+              min={100}
+              step={500}
+              value={cfg.loop?.physics?.maxVelocity ?? 6000}
+              onChange={(e) =>
+                api.updateConfig({
+                  loop: {
+                    ...cfg.loop,
+                    enabled: true,
+                    physics: { ...cfg.loop?.physics, maxVelocity: parseFloat(e.target.value) || 6000 },
+                  },
+                })
+              }
+            />
+          </div>
+        </>
+      )}
+
       <div style={heading}>Add tile</div>
       <div style={row}>
         <span style={label}>Size</span>

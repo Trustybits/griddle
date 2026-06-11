@@ -12,6 +12,8 @@ export type {
   GridChangeEvent,
   GridConfig,
   GridSnapshot,
+  LoopConfig,
+  LoopPhysicsConfig,
   StickyConfig,
   StickyEdge,
   Tile,
@@ -39,6 +41,27 @@ export {
   type Viewport,
   type VisibleRange,
 } from './virtualize.js';
+export {
+  loopEnabled,
+  loopInteraction,
+  assertLoopable,
+  wrapValue,
+  wrapCell,
+  loopPeriod,
+  loopContentPeriods,
+  loopContentSize,
+  loopAnchorScroll,
+  loopInstances,
+  nearestInstanceOrigin,
+  resolveLoop,
+  type LoopTileInstance,
+  type ResolvedLoop,
+} from './loop.js';
+export {
+  PanController,
+  type CameraState,
+  type PanPhysicsOptions,
+} from './pan.js';
 export { Emitter } from './events.js';
 export { DragController, type DragUpdateResult } from './drag.js';
 export { GroupDragController, type GroupDragUpdateResult } from './group-drag.js';

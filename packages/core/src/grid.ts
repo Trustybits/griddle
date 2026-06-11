@@ -20,6 +20,7 @@ import {
 import { moveTile as moveEngine } from './movement.js';
 import { compact as compactEngine } from './compaction.js';
 import { isInFlow } from './positioning.js';
+import { assertLoopable } from './loop.js';
 
 function defaultConfig(c: GridConfig): GridConfig {
   return {
@@ -70,13 +71,16 @@ export class Grid {
 
   constructor(config: GridConfig, initialTiles: Tile[] = []) {
     this.config = defaultConfig(config);
+    assertLoopable(this.config);
     for (const t of initialTiles) this.tilesById.set(t.id, { ...t });
   }
 
   // ---- config -------------------------------------------------------------
 
   updateConfig(patch: Partial<GridConfig>): void {
-    this.config = defaultConfig({ ...this.config, ...patch });
+    const next = defaultConfig({ ...this.config, ...patch });
+    assertLoopable(next);
+    this.config = next;
     this.changes.emit({ type: 'config', tileIds: [] });
   }
 

@@ -13,6 +13,7 @@
   } from '@griddle/core';
   import type { TileLayout } from '@griddle/core';
   import type { GriddleApi } from './griddleStore.js';
+  import LoopGrid from './LoopGrid.svelte';
 
   export let api: GriddleApi;
   export let height: number | string = '100%';
@@ -36,6 +37,9 @@
   $: cfg = $cfgStore;
   $: tilesAll = $tilesStore;
   $: ver = $versionStore;
+
+  // Loop mode delegates rendering to LoopGrid.
+  $: loopOn = cfg.loop?.enabled === true;
 
   $: colSize = cfg.unitWidth + (cfg.gap ?? 0);
   $: rowSize = cfg.unitHeight + (cfg.gap ?? 0);
@@ -263,9 +267,12 @@
   let ro: ResizeObserver;
   onMount(() => {
     updateViewport();
-    scrollEl.addEventListener('scroll', updateViewport, { passive: true });
-    ro = new ResizeObserver(updateViewport);
-    ro.observe(scrollEl);
+    // scrollEl is absent while loop mode delegates to LoopGrid.
+    if (scrollEl) {
+      scrollEl.addEventListener('scroll', updateViewport, { passive: true });
+      ro = new ResizeObserver(updateViewport);
+      ro.observe(scrollEl);
+    }
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
@@ -383,6 +390,22 @@
   })();
 </script>
 
+{#if loopOn}
+  <LoopGrid
+    {api}
+    {height}
+    {showGrid}
+    on:dragStart
+    on:dragEnd
+    on:resizeStart
+    on:resizeEnd
+    on:cameraChange
+  >
+    <svelte:fragment slot="tile" let:tile>
+      <slot name="tile" {tile} />
+    </svelte:fragment>
+  </LoopGrid>
+{:else}
 <div
   bind:this={scrollEl}
   class="griddle-scroll"
@@ -441,6 +464,7 @@
     {/each}
   </div>
 </div>
+{/if}
 
 <style>
   .griddle-scroll {

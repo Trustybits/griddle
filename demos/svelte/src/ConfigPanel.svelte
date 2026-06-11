@@ -61,6 +61,30 @@
     const el = e.currentTarget as HTMLInputElement;
     api.updateConfig({ snapDuringDrag: el.checked });
   }
+  function setLoopEnabled(e: Event) {
+    const el = e.currentTarget as HTMLInputElement;
+    if (el.checked) {
+      api.updateConfig({
+        // Loop requires a finite period on both axes.
+        cols: cfg.cols === Infinity ? 12 : cfg.cols,
+        rows: cfg.rows === Infinity ? 12 : cfg.rows,
+        infiniteX: false,
+        infiniteY: false,
+        loop: { ...cfg.loop, enabled: true },
+      });
+    } else {
+      api.updateConfig({ loop: { ...cfg.loop, enabled: false } });
+    }
+  }
+  function setLoopInteraction(e: Event) {
+    const el = e.currentTarget as HTMLSelectElement;
+    api.updateConfig({ loop: { ...cfg.loop, enabled: true, interaction: el.value as 'pan' | 'edit' } });
+  }
+  function setLoopPhysics(patch: { friction?: number; ease?: number; maxVelocity?: number }) {
+    api.updateConfig({
+      loop: { ...cfg.loop, enabled: true, physics: { ...cfg.loop?.physics, ...patch } },
+    });
+  }
   function exportJson() {
     jsonText = JSON.stringify(api.toJSON(), null, 2);
   }
@@ -121,6 +145,31 @@
       {/each}
     </div>
   </div>
+
+  <div class="h">Loop</div>
+  <div class="row"><span>Loop (infinite repeat)</span>
+    <input type="checkbox" checked={cfg.loop?.enabled === true} on:change={setLoopEnabled}/>
+  </div>
+  {#if cfg.loop?.enabled}
+    <div class="row"><span>Interaction</span>
+      <select value={cfg.loop?.interaction ?? 'pan'} on:change={setLoopInteraction}>
+        <option value="pan">pan (viewer)</option>
+        <option value="edit">edit (owner)</option>
+      </select>
+    </div>
+    <div class="row"><span>Friction (1/s)</span>
+      <input type="number" min="0.5" step="0.5" value={cfg.loop?.physics?.friction ?? 4}
+        on:input={(e) => setLoopPhysics({ friction: parseFloat(e.currentTarget.value) || 4 })}/>
+    </div>
+    <div class="row"><span>Ease (1/s)</span>
+      <input type="number" min="1" step="1" value={cfg.loop?.physics?.ease ?? 12}
+        on:input={(e) => setLoopPhysics({ ease: parseFloat(e.currentTarget.value) || 12 })}/>
+    </div>
+    <div class="row"><span>Max velocity (px/s)</span>
+      <input type="number" min="100" step="500" value={cfg.loop?.physics?.maxVelocity ?? 6000}
+        on:input={(e) => setLoopPhysics({ maxVelocity: parseFloat(e.currentTarget.value) || 6000 })}/>
+    </div>
+  {/if}
 
   <div class="h">Add tile</div>
   <div class="row"><span>Size</span>

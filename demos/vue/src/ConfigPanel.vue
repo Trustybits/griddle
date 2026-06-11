@@ -130,6 +130,32 @@
       </template>
     </div>
 
+    <div :style="heading">Loop</div>
+    <div :style="row"><span :style="label">Loop (infinite repeat)</span>
+      <input type="checkbox" :checked="cfg.loop?.enabled === true" @change="(e) => setLoopEnabled((e.target as HTMLInputElement).checked)"/>
+    </div>
+    <template v-if="cfg.loop?.enabled">
+      <div :style="row"><span :style="label">Interaction</span>
+        <select :style="selectStyle" :value="cfg.loop?.interaction ?? 'pan'"
+          @change="(e) => patchLoop({ interaction: (e.target as HTMLSelectElement).value as 'pan' | 'edit' })">
+          <option value="pan">pan (viewer)</option>
+          <option value="edit">edit (owner)</option>
+        </select>
+      </div>
+      <div :style="row"><span :style="label">Friction (1/s)</span>
+        <input :style="inputStyle" type="number" min="0.5" step="0.5" :value="cfg.loop?.physics?.friction ?? 4"
+          @input="(e) => patchLoopPhysics({ friction: parseFloat((e.target as HTMLInputElement).value) || 4 })"/>
+      </div>
+      <div :style="row"><span :style="label">Ease (1/s)</span>
+        <input :style="inputStyle" type="number" min="1" step="1" :value="cfg.loop?.physics?.ease ?? 12"
+          @input="(e) => patchLoopPhysics({ ease: parseFloat((e.target as HTMLInputElement).value) || 12 })"/>
+      </div>
+      <div :style="row"><span :style="label">Max velocity (px/s)</span>
+        <input :style="inputStyle" type="number" min="100" step="500" :value="cfg.loop?.physics?.maxVelocity ?? 6000"
+          @input="(e) => patchLoopPhysics({ maxVelocity: parseFloat((e.target as HTMLInputElement).value) || 6000 })"/>
+      </div>
+    </template>
+
     <div :style="heading">Add tile</div>
     <div :style="row"><span :style="label">Size</span>
       <div style="display:flex;align-items:center;gap:4px">
@@ -182,6 +208,33 @@ function setCols(v: string) {
 function setRows(v: string) {
   const n = v === '' ? Infinity : Math.max(1, parseInt(v, 10));
   props.api.updateConfig({ rows: n, infiniteY: n === Infinity });
+}
+function setLoopEnabled(enabled: boolean) {
+  const c = cfg.value;
+  if (enabled) {
+    props.api.updateConfig({
+      // Loop requires a finite period on both axes.
+      cols: c.cols === Infinity ? 12 : c.cols,
+      rows: c.rows === Infinity ? 12 : c.rows,
+      infiniteX: false,
+      infiniteY: false,
+      loop: { ...c.loop, enabled: true },
+    });
+  } else {
+    props.api.updateConfig({ loop: { ...c.loop, enabled: false } });
+  }
+}
+function patchLoop(patch: Partial<NonNullable<typeof cfg.value.loop>>) {
+  props.api.updateConfig({ loop: { ...cfg.value.loop, enabled: true, ...patch } });
+}
+function patchLoopPhysics(patch: NonNullable<NonNullable<typeof cfg.value.loop>['physics']>) {
+  props.api.updateConfig({
+    loop: {
+      ...cfg.value.loop,
+      enabled: true,
+      physics: { ...cfg.value.loop?.physics, ...patch },
+    },
+  });
 }
 function exportJson() {
   jsonText.value = JSON.stringify(props.api.toJSON(), null, 2);

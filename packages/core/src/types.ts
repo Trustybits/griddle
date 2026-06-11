@@ -91,6 +91,51 @@ export interface Tile extends CellPos, Footprint {
   sticky?: StickyConfig;
 }
 
+/**
+ * Physics knobs for drag-to-pan in loop mode. All rates are per-second so
+ * behavior is frame-rate independent.
+ */
+export interface LoopPhysicsConfig {
+  /**
+   * Whether drag-to-pan is active. Defaults to true when
+   * `LoopConfig.interaction` is 'pan'; ignored (always false) in 'edit' mode,
+   * where pointer drags rearrange tiles instead.
+   */
+  dragPan?: boolean;
+  /**
+   * Exponential decay rate of the inertia velocity after release (1/s).
+   * Higher stops sooner. Default 4.
+   */
+  friction?: number;
+  /**
+   * Rate at which the camera eases toward its target (1/s). Higher feels
+   * stiffer / more direct. Default 12.
+   */
+  ease?: number;
+  /** Clamp on fling velocity, in px/s. Default 6000. */
+  maxVelocity?: number;
+}
+
+/**
+ * Loop mode: the finite cols x rows grid repeats infinitely in both axes
+ * ("object looping" — tiles wrap around the camera so the plane has no edges).
+ * Requires finite cols/rows; incompatible with infiniteX/infiniteY.
+ */
+export interface LoopConfig {
+  /** Master switch, like gravity. Default false. */
+  enabled: boolean;
+  /**
+   * - 'pan'  — view-only gallery: dragging anywhere pans the camera (with the
+   *            physics below); tile drag/resize/draw-create are disabled.
+   * - 'edit' — tiles drag-n-drop as usual (drop cells wrap across the seam);
+   *            the camera moves via native scroll/wheel only.
+   * Default 'pan'.
+   */
+  interaction?: 'pan' | 'edit';
+  /** Pan physics tuning. Only meaningful for 'pan' interaction. */
+  physics?: LoopPhysicsConfig;
+}
+
 /** Grid configuration. */
 export interface GridConfig {
   /** Columns. Use Infinity for horizontally infinite canvas. */
@@ -151,6 +196,11 @@ export interface GridConfig {
    * `'a, button, input, textarea, select, [contenteditable], .my-caption'`.
    */
   dragIgnoreFrom?: string;
+  /**
+   * Loop mode — the finite grid tiles repeat infinitely in both axes.
+   * Off by default. See LoopConfig.
+   */
+  loop?: LoopConfig;
 }
 
 /** A rectangle in cells (inclusive col,row; exclusive col+w,row+h). */
