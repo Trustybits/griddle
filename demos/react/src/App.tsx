@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { GriddleGrid, useGriddle } from '@griddle/react';
-import type { Tile } from '@griddle/core';
+import type { Tile, PlacementStrategy } from '@griddle/core';
 import { ConfigPanel } from './ConfigPanel.js';
 import { DemoTile } from './Tile.js';
 
@@ -31,25 +31,55 @@ export function App() {
   }));
 
   const nextIdRef = useRef(11);
-  const handleAdd = (w: number, h: number) => {
-    // Find first empty spot (naive scan) within bounds
-    const cfg = api.config;
-    const maxCol = cfg.cols === Infinity ? 20 : cfg.cols;
-    const maxRow = cfg.rows === Infinity ? 40 : cfg.rows;
-    outer: for (let r = 0; r < maxRow; r++) {
-      for (let c = 0; c + w <= maxCol; c++) {
-        const hits = api.grid.tilesIn({ col: c, row: r, w, h });
-        if (hits.length === 0 && api.grid.rectInBounds({ col: c, row: r, w, h })) {
-          const id = String(nextIdRef.current++);
-          api.addTile({ id, col: c, row: r, w, h });
-          return;
-        }
-      }
-      if (r > maxRow) break outer;
-    }
-    // No spot found: place at (0,0) and let the movement/repack do its thing
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const handleAdd = (w: number, h: number, strategy: string, opts: { gravityAware?: boolean; relativeTo?: string }) => {
     const id = String(nextIdRef.current++);
-    api.addTile({ id, col: 0, row: 0, w, h });
+
+    const scrollEl = scrollRef.current?.firstElementChild as HTMLDivElement | null;
+    let anchor: { col: number; row: number } | undefined;
+    if (scrollEl) {
+      const cfg = api.config;
+      const colSize = cfg.unitWidth + (cfg.gap ?? 0);
+      const rowSize = cfg.unitHeight + (cfg.gap ?? 0);
+      const centerX = scrollEl.scrollLeft + scrollEl.clientWidth / 2;
+      const centerY = scrollEl.scrollTop + scrollEl.clientHeight / 2;
+      anchor = {
+        col: Math.floor(centerX / colSize),
+        row: Math.floor(centerY / rowSize),
+      };
+    }
+
+    const result = api.grid.addTileAtBestPosition(
+      { id, col: 0, row: 0, w, h },
+      {
+        strategy: strategy as PlacementStrategy,
+        anchor,
+        gravityAware: opts.gravityAware,
+        relativeTo: opts.relativeTo,
+      },
+    );
+
+    if (result && scrollEl) {
+      const cfg = api.config;
+      const colSize = cfg.unitWidth + (cfg.gap ?? 0);
+      const rowSize = cfg.unitHeight + (cfg.gap ?? 0);
+      const tileX = result.position.col * colSize;
+      const tileY = result.position.row * rowSize;
+      const isVisible = (
+        tileX >= scrollEl.scrollLeft &&
+        tileX < scrollEl.scrollLeft + scrollEl.clientWidth &&
+        tileY >= scrollEl.scrollTop &&
+        tileY < scrollEl.scrollTop + scrollEl.clientHeight
+      );
+      if (!isVisible) {
+        scrollEl.scrollTo({
+          left: tileX - scrollEl.clientWidth / 2 + (w * colSize) / 2,
+          top: tileY - scrollEl.clientHeight / 2 + (h * rowSize) / 2,
+          behavior: 'smooth',
+        });
+      }
+    }
   };
 
   const handleRemove = (id: string) => api.removeTile(id);
@@ -62,7 +92,7 @@ export function App() {
   return (
     <div style={{ display: 'flex', height: '100%' }}>
       <ConfigPanel api={api} onAddTile={handleAdd} nextId={() => String(nextIdRef.current++)} />
-      <div style={{ flex: 1, background: '#eef1f5', position: 'relative' }}>
+      <div ref={scrollRef} style={{ flex: 1, background: '#eef1f5', position: 'relative' }}>
         <GriddleGrid
           api={api}
           renderTile={(t, _selected) => <DemoTile tile={t} onRemove={handleRemove} />}

@@ -1,6 +1,6 @@
 import { CSSProperties, useState } from 'react';
 import type { GriddleApi } from '@griddle/react';
-import type { Corner, Gravity } from '@griddle/core';
+import type { Corner, Gravity, PlacementStrategy } from '@griddle/core';
 
 const panelStyle: CSSProperties = {
   width: 300,
@@ -33,13 +33,16 @@ const CORNER_ORDER: Corner[] = ['nw', 'ne', 'sw', 'se'];
 
 export function ConfigPanel(props: {
   api: GriddleApi;
-  onAddTile: (w: number, h: number) => void;
+  onAddTile: (w: number, h: number, strategy: string, opts: { gravityAware?: boolean; relativeTo?: string }) => void;
   nextId: () => string;
 }) {
   const { api, onAddTile } = props;
   const cfg = api.config;
   const [addW, setAddW] = useState(1);
   const [addH, setAddH] = useState(1);
+  const [strategy, setStrategy] = useState<PlacementStrategy>('nearest');
+  const [gravityAware, setGravityAware] = useState(true);
+  const [referenceTileId, setReferenceTileId] = useState('');
   const [jsonText, setJsonText] = useState('');
 
   const handles = new Set<Corner>(cfg.resizeHandles ?? []);
@@ -151,6 +154,31 @@ export function ConfigPanel(props: {
         </div>
       </div>
 
+      <div style={heading}>Placement</div>
+      <div style={row}>
+        <span style={label}>Strategy</span>
+        <select style={select} value={strategy} onChange={(e) => setStrategy(e.target.value as PlacementStrategy)}>
+          <option value="nearest">nearest</option>
+          <option value="adjacent">adjacent</option>
+          <option value="append">append</option>
+        </select>
+      </div>
+      <div style={row}>
+        <span style={label}>Gravity-aware</span>
+        <input type="checkbox" checked={gravityAware} onChange={(e) => setGravityAware(e.target.checked)} />
+      </div>
+      {strategy === 'adjacent' && (
+        <div style={row}>
+          <span style={label}>Reference tile</span>
+          <select style={select} value={referenceTileId} onChange={(e) => setReferenceTileId(e.target.value)}>
+            <option value="">—</option>
+            {api.grid.tiles.map((t) => (
+              <option key={t.id} value={t.id}>{t.id}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div style={heading}>Add tile</div>
       <div style={row}>
         <span style={label}>Size</span>
@@ -160,8 +188,11 @@ export function ConfigPanel(props: {
           <input style={{ ...input, width: 50 }} type="number" min={1} max={6} value={addH} onChange={(e) => setAddH(Math.max(1, Math.min(6, parseInt(e.target.value, 10) || 1)))} />
         </div>
       </div>
-      <button style={button} onClick={() => onAddTile(addW, addH)}>
-        Add {addW}×{addH} tile
+      <button style={button} onClick={() => onAddTile(addW, addH, strategy, {
+        gravityAware,
+        relativeTo: strategy === 'adjacent' && referenceTileId ? referenceTileId : undefined,
+      })}>
+        Add {addW}×{addH} ({strategy})
       </button>
 
       <div style={heading}>JSON</div>

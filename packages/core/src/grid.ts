@@ -4,10 +4,12 @@
 import type {
   CellPos,
   CellRect,
+  FindPositionOptions,
   Footprint,
   GridChangeEvent,
   GridConfig,
   GridSnapshot,
+  PlacementResult,
   Tile,
 } from './types.js';
 import { Emitter } from './events.js';
@@ -20,6 +22,11 @@ import {
 import { moveTile as moveEngine } from './movement.js';
 import { compact as compactEngine } from './compaction.js';
 import { isInFlow } from './positioning.js';
+import {
+  findNearest,
+  findAdjacent,
+  findAppend,
+} from './placement.js';
 
 function defaultConfig(c: GridConfig): GridConfig {
   return {
@@ -119,6 +126,76 @@ export class Grid {
       if (rect.row < 0) return false;
     }
     return true;
+  }
+
+  /** True if a rect is in bounds and no in-flow tile overlaps it. */
+  canPlace(rect: CellRect): boolean {
+    return this.rectInBounds(rect) && this.tilesIn(rect).length === 0;
+  }
+
+  /**
+   * Find a position for a tile with the given footprint using the specified
+   * strategy. Returns null only for `bestFit` (not yet implemented).
+   */
+  findPosition(
+    footprint: Footprint,
+    opts: FindPositionOptions,
+  ): PlacementResult | null {
+    switch (opts.strategy) {
+      case 'nearest':
+        return findNearest(this, footprint, opts);
+      case 'adjacent':
+        return findAdjacent(this, footprint, opts);
+      case 'append':
+        return findAppend(this, footprint, opts);
+      case 'bestFit':
+        return null;
+    }
+  }
+
+  /**
+   * Atomic find + add: place a tile at the best available position.
+   * Uses displacement when no collision-free spot exists near the anchor.
+   * Returns the placement result, or null if the tile cannot be placed.
+   */
+  addTileAtBestPosition(
+    tile: Tile,
+    opts?: FindPositionOptions,
+  ): PlacementResult | null {
+    const strategy = opts?.strategy ?? 'nearest';
+    const resolvedOpts: FindPositionOptions = {
+      ...opts,
+      strategy,
+    };
+    const result = this.findPosition({ w: tile.w, h: tile.h }, resolvedOpts);
+    if (!result) return null;
+
+    tile.col = result.position.col;
+    tile.row = result.position.row;
+
+    if (result.displaces) {
+      const ok = this.addTileWithDisplacement(tile);
+      if (!ok) return null;
+    } else {
+      this.addTile(tile);
+    }
+    return result;
+  }
+
+  /**
+   * All tiles adjacent to or within `distance` cells of the given tile.
+   * Distance 0 means directly touching (8-neighbor adjacency).
+   */
+  getNeighbors(tileId: string, distance = 0): Tile[] {
+    const tile = this.getTile(tileId);
+    if (!tile) return [];
+    const expanded: CellRect = {
+      col: tile.col - distance - 1,
+      row: tile.row - distance - 1,
+      w: tile.w + 2 * (distance + 1),
+      h: tile.h + 2 * (distance + 1),
+    };
+    return this.tilesIn(expanded, new Set([tileId]));
   }
 
   // ---- mutations ---------------------------------------------------------

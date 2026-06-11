@@ -1,10 +1,12 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import type { GriddleApi } from '@griddle/svelte';
-  import type { Corner } from '@griddle/core';
+  import type { Corner, PlacementStrategy } from '@griddle/core';
 
   export let api: GriddleApi;
-  const dispatch = createEventDispatcher<{ add: { w: number; h: number } }>();
+  const dispatch = createEventDispatcher<{
+    add: { w: number; h: number; strategy: string; gravityAware?: boolean; relativeTo?: string };
+  }>();
 
   const cfgStore = api.config;
   $: cfg = $cfgStore;
@@ -15,6 +17,15 @@
   let addW = 1;
   let addH = 1;
   let jsonText = '';
+
+  const strategies: PlacementStrategy[] = ['nearest', 'adjacent', 'append'];
+  let placementStrategy: PlacementStrategy = 'nearest';
+  let gravityAware = true;
+  let refTileId = '';
+
+  $: gravityActive = typeof cfg.gravity === 'string' ? cfg.gravity !== 'none' : !!cfg.gravity;
+  $: tiles = api.grid.tiles;
+  $: if (placementStrategy !== 'adjacent') refTileId = '';
 
   function toggleHandle(c: Corner) {
     const next = new Set(handlesSet);
@@ -122,6 +133,28 @@
     </div>
   </div>
 
+  <div class="h">Placement</div>
+  <div class="row"><span>Strategy</span>
+    <select bind:value={placementStrategy}>
+      {#each strategies as s}
+        <option value={s}>{s}</option>
+      {/each}
+    </select>
+  </div>
+  {#if placementStrategy === 'adjacent'}
+    <div class="row"><span>Reference tile</span>
+      <select bind:value={refTileId}>
+        <option value="">— none —</option>
+        {#each tiles as t}
+          <option value={t.id}>{t.id} ({t.col},{t.row} {t.w}×{t.h})</option>
+        {/each}
+      </select>
+    </div>
+  {/if}
+  <div class="row"><span>Gravity-aware</span>
+    <input type="checkbox" bind:checked={gravityAware} disabled={!gravityActive}/>
+  </div>
+
   <div class="h">Add tile</div>
   <div class="row"><span>Size</span>
     <div style="display:flex;align-items:center;gap:4px">
@@ -130,7 +163,16 @@
       <input class="small" type="number" min="1" max="6" bind:value={addH}/>
     </div>
   </div>
-  <button class="primary" on:click={() => dispatch('add', { w: addW, h: addH })}>Add {addW}×{addH} tile</button>
+  <button class="primary" on:click={() => dispatch('add', {
+    w: addW, h: addH,
+    strategy: placementStrategy,
+    gravityAware: gravityActive ? gravityAware : undefined,
+    relativeTo: refTileId || undefined,
+  })}>
+    {placementStrategy === 'adjacent' ? `Add ${addW}×${addH} adjacent` :
+     placementStrategy === 'append' ? `Append ${addW}×${addH}` :
+     `Add ${addW}×${addH} nearest`}
+  </button>
 
   <div class="h">JSON</div>
   <textarea bind:value={jsonText} placeholder="Click Export to populate…"></textarea>

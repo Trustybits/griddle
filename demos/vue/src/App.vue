@@ -1,7 +1,7 @@
 <template>
   <div style="display:flex;height:100%">
     <ConfigPanel :api="api" :selected-tile-id="selectedTileId" @add="handleAdd" @select-tile="(id) => selectedTileId = id" />
-    <div style="flex:1;background:#eef1f5;position:relative">
+    <div ref="scrollRef" style="flex:1;background:#eef1f5;position:relative;overflow:auto">
       <GriddleGrid :api="api" @draw-create="handleDrawCreate">
         <template #tile="{ tile }">
           <DemoTile
@@ -19,10 +19,12 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { GriddleGrid, useGriddle } from '@griddle/vue';
+import type { PlacementStrategy } from '@griddle/core';
 import ConfigPanel from './ConfigPanel.vue';
 import DemoTile from './DemoTile.vue';
 
 const selectedTileId = ref<string>('');
+const scrollRef = ref<HTMLDivElement>();
 
 const api = useGriddle({
   config: {
@@ -51,20 +53,51 @@ const api = useGriddle({
 
 let nextId = 11;
 
-function handleAdd(w: number, h: number) {
-  const cfg = api.config.value;
-  const maxCol = cfg.cols === Infinity ? 20 : cfg.cols;
-  const maxRow = cfg.rows === Infinity ? 40 : cfg.rows;
-  for (let r = 0; r < maxRow; r++) {
-    for (let c = 0; c + w <= maxCol; c++) {
-      const hits = api.grid.tilesIn({ col: c, row: r, w, h });
-      if (hits.length === 0 && api.grid.rectInBounds({ col: c, row: r, w, h })) {
-        api.addTile({ id: String(nextId++), col: c, row: r, w, h });
-        return;
-      }
+function handleAdd(w: number, h: number, strategy: PlacementStrategy, opts: { gravityAware?: boolean; relativeTo?: string }) {
+  const scrollEl = scrollRef.value;
+  let anchor: { col: number; row: number } | undefined;
+  if (scrollEl) {
+    const cfg = api.config.value;
+    const colSize = cfg.unitWidth + (cfg.gap ?? 0);
+    const rowSize = cfg.unitHeight + (cfg.gap ?? 0);
+    const centerX = scrollEl.scrollLeft + scrollEl.clientWidth / 2;
+    const centerY = scrollEl.scrollTop + scrollEl.clientHeight / 2;
+    anchor = {
+      col: Math.floor(centerX / colSize),
+      row: Math.floor(centerY / rowSize),
+    };
+  }
+
+  const result = api.grid.addTileAtBestPosition(
+    { id: String(nextId++), col: 0, row: 0, w, h },
+    {
+      strategy,
+      anchor,
+      gravityAware: opts.gravityAware,
+      relativeTo: opts.relativeTo,
+    },
+  );
+
+  if (result && scrollEl) {
+    const cfg = api.config.value;
+    const colSize = cfg.unitWidth + (cfg.gap ?? 0);
+    const rowSize = cfg.unitHeight + (cfg.gap ?? 0);
+    const tileX = result.position.col * colSize;
+    const tileY = result.position.row * rowSize;
+    const isVisible = (
+      tileX >= scrollEl.scrollLeft &&
+      tileX < scrollEl.scrollLeft + scrollEl.clientWidth &&
+      tileY >= scrollEl.scrollTop &&
+      tileY < scrollEl.scrollTop + scrollEl.clientHeight
+    );
+    if (!isVisible) {
+      scrollEl.scrollTo({
+        left: tileX - scrollEl.clientWidth / 2 + (w * colSize) / 2,
+        top: tileY - scrollEl.clientHeight / 2 + (h * rowSize) / 2,
+        behavior: 'smooth',
+      });
     }
   }
-  api.addTile({ id: String(nextId++), col: 0, row: 0, w, h });
 }
 function handleDrawCreate(rect: { col: number; row: number; w: number; h: number }) {
   const id = String(nextId++);

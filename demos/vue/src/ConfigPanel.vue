@@ -138,7 +138,27 @@
         <input :style="{ ...inputStyle, width: '50px' }" type="number" min="1" max="6" v-model.number="addH"/>
       </div>
     </div>
-    <button :style="buttonPrimary" @click="$emit('add', addW, addH)">Add {{ addW }}×{{ addH }} tile</button>
+
+    <div :style="heading">Placement</div>
+    <div :style="row"><span :style="label">Strategy</span>
+      <select :style="selectStyle" v-model="placementStrategy">
+        <option value="nearest">nearest</option>
+        <option value="adjacent">adjacent</option>
+        <option value="append">append</option>
+      </select>
+    </div>
+    <div :style="row"><span :style="label">Gravity-aware</span>
+      <input type="checkbox" v-model="gravityAware"/>
+    </div>
+    <div v-if="placementStrategy === 'adjacent'" :style="row"><span :style="label">Reference tile</span>
+      <select :style="{ ...selectStyle, minWidth: '120px' }" v-model="refTileId">
+        <option value="">(none)</option>
+        <option v-for="t in tiles" :key="t.id" :value="t.id">{{ t.id }}</option>
+      </select>
+    </div>
+    <button :style="buttonPrimary" @click="$emit('add', addW, addH, placementStrategy, { gravityAware, relativeTo: refTileId || undefined })">
+      Add {{ addW }}×{{ addH }} tile ({{ placementStrategy }})
+    </button>
 
     <div :style="heading">JSON</div>
     <textarea v-model="jsonText" :style="textareaStyle" placeholder="Click Export to populate…"></textarea>
@@ -150,12 +170,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { GriddleApi } from '@griddle/vue';
-import type { Corner, StickyEdge, TilePosition } from '@griddle/core';
+import type { Corner, PlacementStrategy, StickyEdge, TilePosition } from '@griddle/core';
 
 const props = defineProps<{ api: GriddleApi; selectedTileId?: string }>();
-defineEmits<{ (e: 'add', w: number, h: number): void; (e: 'selectTile', id: string): void }>();
+defineEmits<{
+  (e: 'add', w: number, h: number, strategy: PlacementStrategy, opts: { gravityAware?: boolean; relativeTo?: string }): void;
+  (e: 'selectTile', id: string): void;
+}>();
 
 const cfg = computed(() => props.api.config.value);
 const tiles = computed(() => props.api.tiles.value);
@@ -168,6 +191,15 @@ const corners: Corner[] = ['nw', 'ne', 'sw', 'se'];
 const handlesSet = computed(() => new Set<Corner>(cfg.value.resizeHandles ?? []));
 const addW = ref(1);
 const addH = ref(1);
+const placementStrategy = ref<PlacementStrategy>('nearest');
+const gravityAware = ref(false);
+const refTileId = ref('');
+
+const gravityIsActive = computed(() => {
+  const g = cfg.value.gravity;
+  return typeof g === 'string' && g !== 'none';
+});
+watch(gravityIsActive, (active) => { gravityAware.value = active; }, { immediate: true });
 const jsonText = ref('');
 
 function toggleHandle(c: Corner) {

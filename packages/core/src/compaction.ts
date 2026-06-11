@@ -12,6 +12,20 @@ export function compact(grid: Grid): string[] {
   const gravity = grid.config.gravity ?? 'none';
   if (gravity === 'none') return [];
 
+  // On infinite axes, use the current content extent as the effective wall
+  // so tiles compact toward each other without drifting into infinity.
+  const inFlowTiles = grid.tiles.filter((t) => isInFlow(t));
+  let wallBottom = grid.config.rows;
+  let wallRight = grid.config.cols;
+  if (grid.config.infiniteY) {
+    wallBottom = 0;
+    for (const t of inFlowTiles) wallBottom = Math.max(wallBottom, t.row + t.h);
+  }
+  if (grid.config.infiniteX) {
+    wallRight = 0;
+    for (const t of inFlowTiles) wallRight = Math.max(wallRight, t.col + t.w);
+  }
+
   const moved = new Set<string>();
   // Iteratively move tiles one cell toward anchor; stop when no tile moves.
   for (let iter = 0; iter < 10_000; iter++) {
@@ -27,7 +41,7 @@ export function compact(grid: Grid): string[] {
       );
 
     for (const t of ordered) {
-      const step = stepToward(t, gravity);
+      const step = stepToward(t, gravity, wallRight, wallBottom);
       if (!step) continue;
       const newRect: CellRect = {
         col: t.col + step.dx,
@@ -51,12 +65,17 @@ export function compact(grid: Grid): string[] {
   return Array.from(moved);
 }
 
-function stepToward(t: Tile, gravity: Gravity): { dx: number; dy: number } | null {
+function stepToward(
+  t: Tile,
+  gravity: Gravity,
+  wallRight: number,
+  wallBottom: number,
+): { dx: number; dy: number } | null {
   if (gravity === 'none') return null;
   if (gravity === 'top') return t.row > 0 ? { dx: 0, dy: -1 } : null;
   if (gravity === 'left') return t.col > 0 ? { dx: -1, dy: 0 } : null;
-  if (gravity === 'bottom') return { dx: 0, dy: 1 };
-  if (gravity === 'right') return { dx: 1, dy: 0 };
+  if (gravity === 'bottom') return t.row + t.h < wallBottom ? { dx: 0, dy: 1 } : null;
+  if (gravity === 'right') return t.col + t.w < wallRight ? { dx: 1, dy: 0 } : null;
   // Anchor cell
   const dx = Math.sign(gravity.col - t.col);
   const dy = Math.sign(gravity.row - t.row);

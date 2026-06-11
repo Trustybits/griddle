@@ -1,5 +1,6 @@
 <script lang="ts">
   import { GriddleGrid, createGriddle } from '@griddle/svelte';
+  import type { PlacementStrategy } from '@griddle/core';
   import ConfigPanel from './ConfigPanel.svelte';
   import DemoTile from './DemoTile.svelte';
 
@@ -29,22 +30,49 @@
   });
 
   let nextId = 11;
+  let scrollEl: HTMLDivElement;
 
-  function handleAdd(e: CustomEvent<{ w: number; h: number }>) {
-    const { w, h } = e.detail;
-    const cfg = api.grid.config;
-    const maxCol = cfg.cols === Infinity ? 20 : cfg.cols;
-    const maxRow = cfg.rows === Infinity ? 40 : cfg.rows;
-    for (let r = 0; r < maxRow; r++) {
-      for (let c = 0; c + w <= maxCol; c++) {
-        const hits = api.grid.tilesIn({ col: c, row: r, w, h });
-        if (hits.length === 0 && api.grid.rectInBounds({ col: c, row: r, w, h })) {
-          api.addTile({ id: String(nextId++), col: c, row: r, w, h });
-          return;
-        }
+  function handleAdd(e: CustomEvent<{ w: number; h: number; strategy: string; gravityAware?: boolean; relativeTo?: string }>) {
+    const { w, h, strategy, gravityAware, relativeTo } = e.detail;
+
+    let anchor: { col: number; row: number } | undefined;
+    if (scrollEl) {
+      const cfg = api.grid.config;
+      const colSize = cfg.unitWidth + (cfg.gap ?? 0);
+      const rowSize = cfg.unitHeight + (cfg.gap ?? 0);
+      const centerX = scrollEl.scrollLeft + scrollEl.clientWidth / 2;
+      const centerY = scrollEl.scrollTop + scrollEl.clientHeight / 2;
+      anchor = {
+        col: Math.floor(centerX / colSize),
+        row: Math.floor(centerY / rowSize),
+      };
+    }
+
+    const result = api.grid.addTileAtBestPosition(
+      { id: String(nextId++), col: 0, row: 0, w, h },
+      { strategy: strategy as PlacementStrategy, anchor, gravityAware, relativeTo },
+    );
+
+    if (result && scrollEl) {
+      const cfg = api.grid.config;
+      const colSize = cfg.unitWidth + (cfg.gap ?? 0);
+      const rowSize = cfg.unitHeight + (cfg.gap ?? 0);
+      const tileX = result.position.col * colSize;
+      const tileY = result.position.row * rowSize;
+      const isVisible = (
+        tileX >= scrollEl.scrollLeft &&
+        tileX < scrollEl.scrollLeft + scrollEl.clientWidth &&
+        tileY >= scrollEl.scrollTop &&
+        tileY < scrollEl.scrollTop + scrollEl.clientHeight
+      );
+      if (!isVisible) {
+        scrollEl.scrollTo({
+          left: tileX - scrollEl.clientWidth / 2 + (w * colSize) / 2,
+          top: tileY - scrollEl.clientHeight / 2 + (h * rowSize) / 2,
+          behavior: 'smooth',
+        });
       }
     }
-    api.addTile({ id: String(nextId++), col: 0, row: 0, w, h });
   }
   function handleRemove(e: CustomEvent<string>) {
     api.removeTile(e.detail);
@@ -53,7 +81,7 @@
 
 <div class="layout">
   <ConfigPanel {api} on:add={handleAdd} />
-  <div class="canvas">
+  <div class="canvas" bind:this={scrollEl}>
     <GriddleGrid {api}>
       <svelte:fragment slot="tile" let:tile>
         <DemoTile {tile} on:remove={handleRemove} />

@@ -177,3 +177,42 @@ export interface GridSnapshot {
   config: GridConfig;
   tiles: Tile[];
 }
+
+// ---- Placement API -----------------------------------------------------
+
+export type PlacementStrategy = 'nearest' | 'adjacent' | 'append' | 'bestFit';
+
+export interface FindPositionOptions {
+  strategy: PlacementStrategy;
+
+  /** For 'nearest': target cell to place as close to as possible. */
+  anchor?: CellPos;
+
+  /** For 'adjacent': place next to this tile id. */
+  relativeTo?: string;
+  /**
+   * For 'adjacent': preferred direction. Default is gravity-aware
+   * (90 deg clockwise from gravity direction).
+   */
+  prefer?: 'below' | 'right' | 'above' | 'left';
+
+  /** For 'bestFit': constrain search to this region. */
+  searchRegion?: CellRect;
+
+  /**
+   * When true, the returned position accounts for gravity — the tile
+   * won't "fall" to a position the user can't see. The result is the
+   * post-compaction resting position.
+   */
+  gravityAware?: boolean;
+
+  /** Max BFS radius (cells). Default 200. */
+  maxSearchRadius?: number;
+}
+
+export interface PlacementResult {
+  /** Position where the tile would land (post-compaction if gravityAware). */
+  position: CellPos;
+  /** Whether displacement of existing tiles would be needed. */
+  displaces: boolean;
+}
