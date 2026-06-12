@@ -97,9 +97,8 @@ export interface Tile extends CellPos, Footprint {
  */
 export interface LoopPhysicsConfig {
   /**
-   * Whether drag-to-pan is active. Defaults to true when
-   * `LoopConfig.interaction` is 'pan'; ignored (always false) in 'edit' mode,
-   * where pointer drags rearrange tiles instead.
+   * Whether drag-to-pan is active. Default true. In 'edit' mode tiles capture
+   * their own pointer drags, so drag-to-pan only engages from the background.
    */
   dragPan?: boolean;
   /**
@@ -117,8 +116,16 @@ export interface LoopPhysicsConfig {
 }
 
 /**
- * Loop mode: the finite cols x rows grid repeats infinitely in both axes
- * ("object looping" — tiles wrap around the camera so the plane has no edges).
+ * Loop mode: the packed content (bounding box of the in-flow tiles) repeats
+ * infinitely in both axes ("object looping" — tiles wrap around the camera so
+ * the plane has no edges). There is no native scrolling: the viewport is
+ * overflow-hidden and wheel/drag input drives a transform camera.
+ *
+ * The loop off->on toggle (and only that toggle) packs tiles into a dense
+ * block so repeats are seamless; already-dense layouts are kept as arranged.
+ * Packing is independent of all other layout strategies — it never runs on
+ * tile moves, drags, creates, resizes, snapshot loads, or toggling loop off
+ * (the packed layout simply persists).
  * Requires finite cols/rows; incompatible with infiniteX/infiniteY.
  */
 export interface LoopConfig {
@@ -128,7 +135,7 @@ export interface LoopConfig {
    * - 'pan'  — view-only gallery: dragging anywhere pans the camera (with the
    *            physics below); tile drag/resize/draw-create are disabled.
    * - 'edit' — tiles drag-n-drop as usual (drop cells wrap across the seam);
-   *            the camera moves via native scroll/wheel only.
+   *            the camera moves via wheel or background drag.
    * Default 'pan'.
    */
   interaction?: 'pan' | 'edit';

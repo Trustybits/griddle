@@ -8,10 +8,8 @@ import {
   footprintEquals,
   wrapValue,
   wrapCell,
+  loopBounds,
   loopPeriod,
-  loopContentPeriods,
-  loopContentSize,
-  loopAnchorScroll,
   loopInstances,
   nearestInstanceOrigin,
   resolveLoop,
@@ -407,47 +405,50 @@ test('Loop: wrapValue positive modulo', () => {
 });
 
 test('Loop: wrapCell wraps into base period', () => {
-  const cfg = { cols: 12, rows: 8, unitWidth: 50, unitHeight: 50 };
-  deepEq(wrapCell({ col: 13, row: -1 }, cfg), { col: 1, row: 7 });
-  deepEq(wrapCell({ col: -12, row: 8 }, cfg), { col: 0, row: 0 });
+  const bounds = { cols: 12, rows: 8 };
+  deepEq(wrapCell({ col: 13, row: -1 }, bounds), { col: 1, row: 7 });
+  deepEq(wrapCell({ col: -12, row: 8 }, bounds), { col: 0, row: 0 });
 });
 
-test('Loop: loopPeriod includes gap', () => {
+test('Loop: loopBounds is the content bounding box', () => {
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 2, h: 1 },
+    { id: 'b', col: 3, row: 2, w: 2, h: 2 },
+    // Out-of-flow tiles are excluded.
+    { id: 'p', col: 50, row: 50, w: 1, h: 1, position: 'absolute', pinned: { x: 0, y: 0 } },
+  ];
+  deepEq(loopBounds(tiles), { cols: 5, rows: 4 });
+  deepEq(loopBounds([]), { cols: 1, rows: 1 });
+});
+
+test('Loop: loopPeriod derives from content, includes gap', () => {
   const cfg = { cols: 10, rows: 5, unitWidth: 50, unitHeight: 40, gap: 4 };
-  deepEq(loopPeriod(cfg), { width: 10 * 54, height: 5 * 44 });
-});
-
-test('Loop: content spans >= 3 periods and >= viewport + 2 periods', () => {
-  const cfg = { cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 };
-  // period = 200px; small viewport -> 3 periods
-  deepEq(loopContentPeriods(cfg, 150, 150), { nx: 3, ny: 3 });
-  // viewport 900px > period -> ceil(900/200)+2 = 7
-  deepEq(loopContentPeriods(cfg, 900, 150), { nx: 7, ny: 3 });
-  const size = loopContentSize(cfg, 900, 150);
-  assert(size.width >= 900 + 2 * 200, 'content >= viewport + 2 periods');
-});
-
-test('Loop: loopAnchorScroll keeps scroll inside [period, 2*period)', () => {
-  eq(loopAnchorScroll(0, 200), 200);
-  eq(loopAnchorScroll(50, 200), 250);
-  eq(loopAnchorScroll(250, 200), 250);
-  eq(loopAnchorScroll(-50, 200), 350);
-  assert(loopAnchorScroll(123456.7, 200) >= 200);
-  assert(loopAnchorScroll(123456.7, 200) < 400);
+  // Tiles only span 4 cols x 2 rows of the 10x5 grid: period is the content,
+  // not the configured grid, so repeats have no dead space between them.
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 2, h: 2 },
+    { id: 'b', col: 2, row: 0, w: 2, h: 2 },
+  ];
+  deepEq(loopPeriod(cfg, tiles), { width: 4 * 54, height: 2 * 44 });
 });
 
 test('Loop: loopInstances returns one copy per visible period', () => {
   const cfg = { cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 };
-  // period 200x200. Tile at (0,0) 1x1 -> base rect [0,50)x[0,50).
-  const tiles = [{ id: 'a', col: 0, row: 0, w: 1, h: 1 }];
+  // Marker tile at (3,3) makes the content bounding box 4x4 -> period 200x200.
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 1, h: 1 },
+    { id: 'z', col: 3, row: 3, w: 1, h: 1 },
+  ];
   // View covering exactly the second period.
-  const one = loopInstances(cfg, tiles, { x: 200, y: 200, width: 200, height: 200 });
+  const one = loopInstances(cfg, tiles, { x: 200, y: 200, width: 200, height: 200 })
+    .filter((i) => i.tile.id === 'a');
   eq(one.length, 1);
   eq(one[0].key, 'a@1,1');
   eq(one[0].left, 200);
   eq(one[0].top, 200);
   // View spanning a seam horizontally -> two copies.
-  const two = loopInstances(cfg, tiles, { x: 190, y: 200, width: 220, height: 100 });
+  const two = loopInstances(cfg, tiles, { x: 190, y: 200, width: 220, height: 100 })
+    .filter((i) => i.tile.id === 'a');
   eq(two.length, 2);
   const keys = two.map((i) => i.key).sort();
   deepEq(keys, ['a@1,1', 'a@2,1']);
@@ -459,15 +460,17 @@ test('Loop: loopInstances skips out-of-flow tiles', () => {
     { id: 'a', col: 0, row: 0, w: 1, h: 1 },
     { id: 'p', col: 0, row: 0, w: 1, h: 1, position: 'absolute', pinned: { x: 0, y: 0 } },
   ];
-  const out = loopInstances(cfg, tiles, { x: 0, y: 0, width: 200, height: 200 });
+  // Bounds from 'a' alone -> period 50x50; view of one period -> one copy.
+  const out = loopInstances(cfg, tiles, { x: 0, y: 0, width: 50, height: 50 });
   eq(out.length, 1);
   eq(out[0].tile.id, 'a');
 });
 
 test('Loop: nearestInstanceOrigin picks the copy near the point', () => {
   const cfg = { cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 };
-  // Cell (1,1) base origin = (50,50); period 200.
-  const near = nearestInstanceOrigin(cfg, { col: 1, row: 1 }, { x: 460, y: 70 });
+  // Marker at (3,3) -> bounds 4x4, period 200. Cell (1,1) base origin (50,50).
+  const tiles = [{ id: 'z', col: 3, row: 3, w: 1, h: 1 }];
+  const near = nearestInstanceOrigin(cfg, tiles, { col: 1, row: 1 }, { x: 460, y: 70 });
   deepEq(near, { left: 450, top: 50 });
 });
 
@@ -483,8 +486,144 @@ test('Loop: resolveLoop applies defaults', () => {
     loop: { enabled: true, interaction: 'edit', physics: { friction: 7 } },
   });
   eq(edit.interaction, 'edit');
-  assert(!edit.dragPan, 'edit mode never drag-pans');
+  assert(edit.dragPan, 'edit mode drag-pans from the background by default');
   eq(edit.friction, 7);
+  const noPan = resolveLoop({
+    cols: 4, rows: 4, unitWidth: 50, unitHeight: 50,
+    loop: { enabled: true, physics: { dragPan: false } },
+  });
+  assert(!noPan.dragPan, 'physics.dragPan: false disables drag-to-pan');
+});
+
+test('Loop: Grid.pack compacts tiles into a dense block', () => {
+  const g = new Grid(
+    { cols: 4, rows: 12, unitWidth: 50, unitHeight: 50 },
+    [
+      { id: 'a', col: 0, row: 4, w: 2, h: 2 },
+      { id: 'b', col: 3, row: 9, w: 1, h: 1 },
+      { id: 'c', col: 2, row: 4, w: 2, h: 1 },
+    ],
+  );
+  g.pack();
+  // Reading order: a (row 4), c (row 4, col 2), b (row 9).
+  // a -> (0,0); c -> (2,0); b -> first free scanning row 0: (2,1).
+  const a = g.getTile('a');
+  const c = g.getTile('c');
+  const b = g.getTile('b');
+  deepEq({ col: a.col, row: a.row }, { col: 0, row: 0 });
+  deepEq({ col: c.col, row: c.row }, { col: 2, row: 0 });
+  deepEq({ col: b.col, row: b.row }, { col: 2, row: 1 });
+  deepEq(loopBounds(g.tiles), { cols: 4, rows: 2 });
+});
+
+test('Loop: pack finds a hole-free tiling when one exists', () => {
+  // The React demo's default tile set: 20 cells of area — tiles a 10x2
+  // rectangle exactly, so pack must produce zero holes.
+  const g = new Grid(
+    { cols: 12, rows: 12, unitWidth: 50, unitHeight: 50 },
+    [
+      { id: '1', col: 0, row: 0, w: 2, h: 2 },
+      { id: '2', col: 2, row: 0, w: 1, h: 1 },
+      { id: '3', col: 3, row: 0, w: 3, h: 1 },
+      { id: '4', col: 6, row: 0, w: 1, h: 2 },
+      { id: '5', col: 7, row: 0, w: 2, h: 2 },
+      { id: '6', col: 0, row: 2, w: 1, h: 1 },
+      { id: '7', col: 1, row: 2, w: 1, h: 1 },
+      { id: '8', col: 9, row: 0, w: 1, h: 1 },
+      { id: '9', col: 10, row: 0, w: 1, h: 1 },
+      { id: '10', col: 2, row: 1, w: 2, h: 1 },
+    ],
+  );
+  g.pack();
+  const tiles = g.tiles;
+  const area = tiles.reduce((s, t) => s + t.w * t.h, 0);
+  const b = loopBounds(tiles);
+  eq(b.cols * b.rows, area, 'bounding box must have zero holes');
+  // No overlaps.
+  for (let i = 0; i < tiles.length; i++) {
+    for (let j = i + 1; j < tiles.length; j++) {
+      const a = tiles[i], c = tiles[j];
+      const overlap =
+        a.col < c.col + c.w && c.col < a.col + a.w &&
+        a.row < c.row + c.h && c.row < a.row + a.h;
+      assert(!overlap, `tiles ${a.id} and ${c.id} overlap`);
+    }
+  }
+});
+
+test('Loop: pack preserves an already-dense layout', () => {
+  // A hand-packed perfect 10x2 rectangle: pack must not move anything.
+  const layout = [
+    { id: '1', col: 0, row: 0, w: 2, h: 2 },
+    { id: '2', col: 2, row: 0, w: 1, h: 1 },
+    { id: '3', col: 3, row: 0, w: 3, h: 1 },
+    { id: '10', col: 2, row: 1, w: 2, h: 1 },
+    { id: '7', col: 4, row: 1, w: 1, h: 1 },
+    { id: '6', col: 5, row: 1, w: 1, h: 1 },
+    { id: '4', col: 6, row: 0, w: 1, h: 2 },
+    { id: '5', col: 7, row: 0, w: 2, h: 2 },
+    { id: '8', col: 9, row: 0, w: 1, h: 1 },
+    { id: '9', col: 9, row: 1, w: 1, h: 1 },
+  ];
+  const g = new Grid({ cols: 12, rows: 12, unitWidth: 50, unitHeight: 50 }, layout);
+  const movedAny = g.pack();
+  assert(!movedAny, 'pack must not touch a perfectly dense layout');
+  for (const t of layout) {
+    const cur = g.getTile(t.id);
+    deepEq({ col: cur.col, row: cur.row }, { col: t.col, row: t.row });
+  }
+});
+
+test('Loop: pack translates an offset dense layout to the origin', () => {
+  const g = new Grid(
+    { cols: 12, rows: 12, unitWidth: 50, unitHeight: 50 },
+    [
+      { id: 'a', col: 3, row: 2, w: 2, h: 1 },
+      { id: 'b', col: 5, row: 2, w: 1, h: 1 },
+    ],
+  );
+  const movedAny = g.pack();
+  assert(movedAny, 'offset layout must be translated');
+  deepEq({ col: g.getTile('a').col, row: g.getTile('a').row }, { col: 0, row: 0 });
+  deepEq({ col: g.getTile('b').col, row: g.getTile('b').row }, { col: 2, row: 0 });
+});
+
+test('Loop: enabling loop auto-packs the layout', () => {
+  const g = new Grid(
+    { cols: 4, rows: 12, unitWidth: 50, unitHeight: 50 },
+    [
+      { id: 'a', col: 0, row: 6, w: 1, h: 1 },
+      { id: 'b', col: 3, row: 2, w: 1, h: 1 },
+    ],
+  );
+  g.updateConfig({ loop: { enabled: true } });
+  const bounds = loopBounds(g.tiles);
+  deepEq(bounds, { cols: 2, rows: 1 });
+});
+
+test('Loop: pack fires only on the off->on toggle', () => {
+  // Constructing (or loading a snapshot) with loop already enabled respects
+  // the stored layout as-is — no auto-pack.
+  const g = new Grid(
+    { cols: 4, rows: 12, unitWidth: 50, unitHeight: 50, loop: { enabled: true } },
+    [
+      { id: 'a', col: 0, row: 6, w: 1, h: 1 },
+      { id: 'b', col: 3, row: 2, w: 1, h: 1 },
+    ],
+  );
+  deepEq({ col: g.getTile('a').col, row: g.getTile('a').row }, { col: 0, row: 6 });
+  deepEq({ col: g.getTile('b').col, row: g.getTile('b').row }, { col: 3, row: 2 });
+  // Other config changes while looping do not repack.
+  g.updateConfig({ gap: 8 });
+  deepEq({ col: g.getTile('a').col, row: g.getTile('a').row }, { col: 0, row: 6 });
+  // Moving a tile while looping uses the normal pipeline — no repack.
+  g.moveTile('b', { col: 2, row: 6 });
+  deepEq({ col: g.getTile('b').col, row: g.getTile('b').row }, { col: 2, row: 6 });
+  deepEq({ col: g.getTile('a').col, row: g.getTile('a').row }, { col: 0, row: 6 });
+  // Toggling loop OFF does not repack either; the layout simply stays.
+  g.updateConfig({ loop: { enabled: false } });
+  deepEq({ col: g.getTile('a').col, row: g.getTile('a').row }, { col: 0, row: 6 });
+  deepEq({ col: g.getTile('b').col, row: g.getTile('b').row }, { col: 2, row: 6 });
 });
 
 test('Loop: Grid rejects loop + infinite axes', () => {

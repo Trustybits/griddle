@@ -1,13 +1,14 @@
 <script lang="ts">
   // Loop-mode renderer ("object looping") — see @griddle/core loop.ts for the
-  // coordinate model. Mirrors the React GriddleLoopGrid.
+  // coordinate model. Mirrors the React GriddleLoopGrid: an overflow-hidden
+  // viewport, a transform-translated plane driven by an unbounded camera, and
+  // NO native scrolling (wheel deltas feed the camera directly).
   import { onMount, onDestroy, tick, createEventDispatcher } from 'svelte';
   import type { CameraState, CellPos, Corner } from '@griddle/core';
   import {
     DragController,
     PanController,
-    loopAnchorScroll,
-    loopContentSize,
+    loopBounds,
     loopInstances,
     loopPeriod,
     nearestInstanceOrigin,
@@ -32,7 +33,8 @@
   const DEFAULT_DRAG_IGNORE = 'a, button, input, textarea, select, [contenteditable]';
   const PAN_THRESHOLD_PX = 4;
 
-  let scrollEl: HTMLDivElement;
+  let viewportEl: HTMLDivElement;
+  let planeEl: HTMLDivElement;
 
   const cfgStore = api.config;
   const tilesStore = api.tiles;
@@ -47,60 +49,40 @@
   $: halfGap = gapPx / 2;
   $: colSize = cfg.unitWidth + gapPx;
   $: rowSize = cfg.unitHeight + gapPx;
-  $: period = loopPeriod(cfg);
+  $: period = loopPeriod(cfg, tilesAll);
 
-  // ---- camera + scroll plumbing -----------------------------------------
+  // ---- camera plumbing ----------------------------------------------------
   const pan = new PanController();
   $: if (loop) {
     pan.setPhysics({ friction: loop.friction, ease: loop.ease, maxVelocity: loop.maxVelocity });
   }
 
-  const expectedScroll = { x: -1, y: -1 };
-  let view = { sxCell: 0, syCell: 0, kax: 0, kay: 0, vw: 1000, vh: 800 };
+  let view = { cxCell: 0, cyCell: 0, vw: 1000, vh: 800 };
   let lastCam: CameraState | null = null;
   let raf = 0;
+  let resizeObserver: ResizeObserver | null = null;
 
-  function onScroll() {
-    if (!scrollEl) return;
-    const dx = scrollEl.scrollLeft - expectedScroll.x;
-    const dy = scrollEl.scrollTop - expectedScroll.y;
-    if (dx !== 0 || dy !== 0) {
-      pan.scrollBy(dx, dy);
-      expectedScroll.x = scrollEl.scrollLeft;
-      expectedScroll.y = scrollEl.scrollTop;
-    }
+  function onWheel(e: WheelEvent) {
+    e.preventDefault();
+    const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1;
+    pan.scrollBy(e.deltaX * k, e.deltaY * k);
   }
 
   function frame(now: number) {
     raf = requestAnimationFrame(frame);
-    if (!scrollEl) return;
     const st = pan.tick(now);
 
-    const sx = loopAnchorScroll(st.x, period.width);
-    const sy = loopAnchorScroll(st.y, period.height);
-    if (Math.abs(scrollEl.scrollLeft - sx) > 0.5) {
-      scrollEl.scrollLeft = sx;
-      expectedScroll.x = scrollEl.scrollLeft;
+    if (planeEl) {
+      planeEl.style.transform = `translate3d(${-st.x}px, ${-st.y}px, 0)`;
     }
-    if (Math.abs(scrollEl.scrollTop - sy) > 0.5) {
-      scrollEl.scrollTop = sy;
-      expectedScroll.y = scrollEl.scrollTop;
+    if (viewportEl && showGrid) {
+      viewportEl.style.backgroundPosition = `${-st.x % colSize}px ${-st.y % rowSize}px`;
     }
 
-    const next = {
-      sxCell: Math.floor(scrollEl.scrollLeft / colSize),
-      syCell: Math.floor(scrollEl.scrollTop / rowSize),
-      kax: Math.floor(st.x / period.width),
-      kay: Math.floor(st.y / period.height),
-      vw: scrollEl.clientWidth,
-      vh: scrollEl.clientHeight,
-    };
-    if (
-      next.sxCell !== view.sxCell || next.syCell !== view.syCell ||
-      next.kax !== view.kax || next.kay !== view.kay ||
-      next.vw !== view.vw || next.vh !== view.vh
-    ) {
-      view = next;
+    const cxCell = Math.floor(st.x / colSize);
+    const cyCell = Math.floor(st.y / rowSize);
+    if (cxCell !== view.cxCell || cyCell !== view.cyCell) {
+      view = { ...view, cxCell, cyCell };
     }
 
     if (
@@ -112,31 +94,25 @@
     }
   }
 
-  $: contentSize = loopContentSize(cfg, view.vw, view.vh);
-
   $: instances = (() => {
     void ver; // re-run on grid changes
     const bufX = 2 * colSize;
     const bufY = 2 * rowSize;
     return loopInstances(cfg, tilesAll, {
-      x: view.sxCell * colSize - bufX,
-      y: view.syCell * rowSize - bufY,
+      x: view.cxCell * colSize - bufX,
+      y: view.cyCell * rowSize - bufY,
       width: view.vw + colSize + 2 * bufX,
       height: view.vh + rowSize + 2 * bufY,
     });
   })();
 
-  // World-stable key: survives the seam teleport so DOM nodes are reused.
-  function worldKey(inst: LoopTileInstance): string {
-    return `${inst.tile.id}@${inst.kx + view.kax - 1},${inst.ky + view.kay - 1}`;
-  }
-
-  // ---- pan gesture ('pan' interaction) -----------------------------------
+  // ---- pan gesture ----------------------------------------------------------
   let panGesture: { pointerId: number; startX: number; startY: number; moved: boolean } | null = null;
   let suppressClick = false;
 
   function onContainerPointerDown(e: PointerEvent) {
-    if (editable) return;
+    // Tiles that start drags stopPropagation, so reaching here from a tile
+    // means it was not draggable — panning is the right fallback.
     if (!loop?.dragPan || e.button !== 0) return;
     const ignoreSelector = cfg.dragIgnoreFrom ?? DEFAULT_DRAG_IGNORE;
     if (ignoreSelector && (e.target as HTMLElement).closest(ignoreSelector)) return;
@@ -268,7 +244,7 @@
           col: drag.pickupCol + Math.round(dx / colSize),
           row: drag.pickupRow + Math.round(dy / rowSize),
         },
-        cfg,
+        loopBounds(api.grid.tiles),
       );
       const result = dragController.update(candidate);
       drag = {
@@ -329,7 +305,10 @@
       const t = api.grid.getTile(r.tileId);
       let committed = false;
       if (t) {
-        const target = wrapCell({ col: r.previewCol, row: r.previewRow }, cfg);
+        const target = wrapCell(
+          { col: r.previewCol, row: r.previewRow },
+          loopBounds(api.grid.tiles),
+        );
         if (target.col !== t.col || target.row !== t.row) {
           api.moveTile(r.tileId, target);
         }
@@ -346,10 +325,16 @@
   }
 
   onMount(() => {
-    if (scrollEl) {
-      expectedScroll.x = scrollEl.scrollLeft;
-      expectedScroll.y = scrollEl.scrollTop;
-      scrollEl.addEventListener('scroll', onScroll, { passive: true });
+    if (viewportEl) {
+      viewportEl.addEventListener('wheel', onWheel, { passive: false });
+      const measure = () => {
+        if (viewportEl.clientWidth !== view.vw || viewportEl.clientHeight !== view.vh) {
+          view = { ...view, vw: viewportEl.clientWidth, vh: viewportEl.clientHeight };
+        }
+      };
+      measure();
+      resizeObserver = new ResizeObserver(measure);
+      resizeObserver.observe(viewportEl);
     }
     raf = requestAnimationFrame(frame);
     window.addEventListener('pointermove', onPointerMove);
@@ -358,7 +343,8 @@
   });
   onDestroy(() => {
     cancelAnimationFrame(raf);
-    if (scrollEl) scrollEl.removeEventListener('scroll', onScroll);
+    if (viewportEl) viewportEl.removeEventListener('wheel', onWheel);
+    resizeObserver?.disconnect();
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
     window.removeEventListener('pointercancel', onPointerUp);
@@ -390,7 +376,7 @@
     const draggerId = drag?.tileId ?? null;
     const seen = new Set<string>();
     for (const inst of instances) {
-      const key = worldKey(inst);
+      const key = inst.key;
       seen.add(key);
       const x = inst.left;
       const y = inst.top;
@@ -428,6 +414,7 @@
     if (!t) return null;
     const origin = nearestInstanceOrigin(
       cfg,
+      tilesAll,
       { col: drag.indicatorCol, row: drag.indicatorRow },
       { x: drag.instanceLeft + drag.deltaX, y: drag.instanceTop + drag.deltaY },
     );
@@ -456,22 +443,18 @@
 
 <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
 <div
-  bind:this={scrollEl}
-  class="griddle-scroll"
-  class:griddle-pannable={loop?.dragPan}
+  bind:this={viewportEl}
+  class="griddle-viewport"
+  class:griddle-pannable={!editable && loop?.dragPan}
+  class:grid-bg={showGrid}
   style:height={typeof height === 'number' ? height + 'px' : height}
+  style:--colsize={colSize + 'px'}
+  style:--rowsize={rowSize + 'px'}
+  style:--griddle-tile-radius={(cfg.tileRadius ?? 4) + 'px'}
   on:pointerdown={onContainerPointerDown}
   on:click|capture={onClickCapture}
 >
-  <div
-    class="griddle-content"
-    class:grid-bg={showGrid}
-    style:width={contentSize.width + 'px'}
-    style:height={contentSize.height + 'px'}
-    style:--colsize={colSize + 'px'}
-    style:--rowsize={rowSize + 'px'}
-    style:--griddle-tile-radius={(cfg.tileRadius ?? 4) + 'px'}
-  >
+  <div bind:this={planeEl} class="griddle-plane">
     {#if indicatorRect}
       <div
         class="griddle-drop-indicator"
@@ -481,7 +464,7 @@
         style:height={indicatorRect.height + 'px'}
       ></div>
     {/if}
-    {#each instances.filter((i) => !(drag && i.tile.id === drag.tileId)) as inst (worldKey(inst))}
+    {#each instances.filter((i) => !(drag && i.tile.id === drag.tileId)) as inst (inst.key)}
       {@const layout = instanceLayout(inst, resize)}
       <div
         class="griddle-tile"
@@ -489,7 +472,7 @@
         class:griddle-resizing={resize?.instanceKey === inst.key}
         data-griddle-tile={inst.tile.id}
         data-griddle-instance={inst.key}
-        use:registerNode={worldKey(inst)}
+        use:registerNode={inst.key}
         on:pointerdown={(e) => onTilePointerDown(e, inst)}
         style:left={layout.left + 'px'}
         style:top={layout.top + 'px'}
@@ -525,17 +508,14 @@
 </div>
 
 <style>
-  .griddle-scroll {
+  .griddle-viewport {
     position: relative;
-    overflow: auto;
+    overflow: hidden;
     touch-action: none;
     user-select: none;
   }
-  .griddle-scroll.griddle-pannable {
+  .griddle-viewport.griddle-pannable {
     cursor: grab;
-  }
-  .griddle-content {
-    position: relative;
   }
   .grid-bg {
     background-image:
@@ -543,11 +523,18 @@
       linear-gradient(to bottom, rgba(0,0,0,0.08) 1px, transparent 1px);
     background-size: var(--colsize) var(--rowsize);
   }
+  .griddle-plane {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    will-change: transform;
+  }
   .griddle-tile {
     position: absolute;
     box-sizing: border-box;
     user-select: none;
-    will-change: transform;
     z-index: 1;
     border-radius: var(--griddle-tile-radius, 4px);
   }

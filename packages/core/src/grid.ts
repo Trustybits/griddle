@@ -20,7 +20,8 @@ import {
 import { moveTile as moveEngine } from './movement.js';
 import { compact as compactEngine } from './compaction.js';
 import { isInFlow } from './positioning.js';
-import { assertLoopable } from './loop.js';
+import { assertLoopable, loopEnabled } from './loop.js';
+import { computePack } from './packing.js';
 
 function defaultConfig(c: GridConfig): GridConfig {
   return {
@@ -73,15 +74,22 @@ export class Grid {
     this.config = defaultConfig(config);
     assertLoopable(this.config);
     for (const t of initialTiles) this.tilesById.set(t.id, { ...t });
+    // Note: no auto-pack here even when loop starts enabled — packing fires
+    // only on the loop off->on toggle (see updateConfig). Constructing or
+    // loading a snapshot respects the stored layout as-is.
   }
 
   // ---- config -------------------------------------------------------------
 
   updateConfig(patch: Partial<GridConfig>): void {
+    const wasLooping = loopEnabled(this.config);
     const next = defaultConfig({ ...this.config, ...patch });
     assertLoopable(next);
     this.config = next;
     this.changes.emit({ type: 'config', tileIds: [] });
+    // Loop repeats the content's bounding box; holes inside it would repeat
+    // too, so entering loop mode compacts the layout into a dense block.
+    if (!wasLooping && loopEnabled(next)) this.pack();
   }
 
   // ---- tile queries -------------------------------------------------------
@@ -458,6 +466,63 @@ export class Grid {
     if (moved.length > 0) {
       this.changes.emit({ type: 'compact', tileIds: moved });
     }
+  }
+
+  /**
+   * Repack all in-flow tiles into a dense block (no holes when a hole-free
+   * tiling exists — exact bounded search, then a gap-minimizing greedy
+   * fallback; see packing.ts). A layout that is already perfectly dense is
+   * left exactly as the user arranged it (translated to the origin if
+   * offset). Out-of-flow tiles are untouched. Returns true if any tile moved.
+   */
+  pack(): boolean {
+    const flow = this.tiles.filter(isInFlow);
+    if (flow.length === 0) return false;
+
+    const cols = Number.isFinite(this.config.cols) ? this.config.cols : 0;
+    if (cols <= 0) return false;
+
+    // Already dense: keep the user's arrangement, just anchor it at (0,0).
+    let minCol = Infinity, minRow = Infinity, maxCol = -Infinity, maxRow = -Infinity;
+    let area = 0;
+    for (const t of flow) {
+      minCol = Math.min(minCol, t.col);
+      minRow = Math.min(minRow, t.row);
+      maxCol = Math.max(maxCol, t.col + t.w);
+      maxRow = Math.max(maxRow, t.row + t.h);
+      area += t.w * t.h;
+    }
+    if ((maxCol - minCol) * (maxRow - minRow) === area) {
+      if (minCol === 0 && minRow === 0) return false;
+      const moved: string[] = [];
+      for (const t of flow) {
+        this._setTilePos(t.id, { col: t.col - minCol, row: t.row - minRow });
+        moved.push(t.id);
+      }
+      this.changes.emit({ type: 'compact', tileIds: moved });
+      return true;
+    }
+
+    const result = computePack(
+      flow.map((t) => ({ id: t.id, w: Math.min(t.w, cols), h: t.h })),
+      cols,
+    );
+    if (!result) return false;
+
+    const moved: string[] = [];
+    for (const t of flow) {
+      const p = result.placements.get(t.id);
+      if (!p) continue;
+      const w = Math.min(t.w, cols);
+      if (p.col !== t.col || p.row !== t.row || w !== t.w) {
+        this._setTileRect(t.id, { col: p.col, row: p.row, w, h: t.h });
+        moved.push(t.id);
+      }
+    }
+    if (moved.length > 0) {
+      this.changes.emit({ type: 'compact', tileIds: moved });
+    }
+    return moved.length > 0;
   }
 
   // ---- serialization ----------------------------------------------------

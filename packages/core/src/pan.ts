@@ -5,10 +5,10 @@
 //   target follows the pointer 1:1 (inverted — content follows the finger)
 //   and a velocity estimate is kept; on release the target keeps coasting
 //   under exponential friction (inertia/fling).
-// - scrollBy: external deltas (native scroll/wheel). Applied directly to both
+// - scrollBy: external deltas (wheel/trackpad). Applied directly to both
 //   camera and target — the browser already smooths these.
 // - tick(now): advances easing + inertia. Adapters call this from their rAF
-//   loop and map the camera onto the scroll position with loopAnchorScroll.
+//   loop and apply the camera to the plane's CSS transform.
 //
 // All rates are per-second (exponential, frame-rate independent).
 

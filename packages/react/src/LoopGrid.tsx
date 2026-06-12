@@ -1,18 +1,18 @@
 // GriddleLoopGrid: loop-mode renderer ("object looping").
 //
-// The finite cols x rows grid repeats infinitely in both axes. The scroll
-// content spans N periods; the native scroll position is kept anchored inside
-// the second period and teleported back by exactly one period when the camera
-// crosses a seam (invisible, because the rendered instances are
-// period-translated copies). An unbounded PanController camera is the single
-// source of truth; native scroll deltas feed into it, and (in 'pan'
-// interaction) drag-to-pan with momentum drives it.
+// The packed content (bounding box of the in-flow tiles) repeats infinitely
+// in both axes. There is NO native scrolling: the viewport is an
+// overflow-hidden box and an unbounded PanController camera translates a
+// zero-sized "plane" element via CSS transform. Wheel deltas and (optionally)
+// drag-to-pan feed the camera. Because nothing has scrollable overflow, no
+// scrollbars appear and the component can never affect page layout.
 //
 // Interactions:
 // - 'pan'  — drag anywhere pans the camera with configurable physics. Tiles
 //            are view-only (no drag / resize / selection / draw-create).
 // - 'edit' — tiles drag-n-drop as usual; drop cells wrap across the seam.
-//            The camera moves via native scroll/wheel only.
+//            Wheel pans, and dragging the background pans (tiles capture
+//            their own pointerdown).
 
 import {
   CSSProperties,
@@ -27,8 +27,7 @@ import type { Corner, Tile, CameraState, LoopTileInstance } from '@griddle/core'
 import {
   DragController,
   PanController,
-  loopAnchorScroll,
-  loopContentSize,
+  loopBounds,
   loopInstances,
   loopPeriod,
   nearestInstanceOrigin,
@@ -42,12 +41,9 @@ const DEFAULT_DRAG_IGNORE = 'a, button, input, textarea, select, [contenteditabl
 const PAN_THRESHOLD_PX = 4;
 
 interface LoopView {
-  /** Quantized scroll position, in whole cells (content space). */
-  sxCell: number;
-  syCell: number;
-  /** Anchor period index per axis: floor(camera / period). */
-  kax: number;
-  kay: number;
+  /** Quantized camera position, in whole cells (world space). */
+  cxCell: number;
+  cyCell: number;
   /** Viewport pixel size. */
   vw: number;
   vh: number;
@@ -55,7 +51,7 @@ interface LoopView {
 
 interface LoopDragVisual {
   tileId: string;
-  /** Content-space origin of the grabbed instance at pickup. */
+  /** World-space origin of the grabbed instance at pickup. */
   instanceLeft: number;
   instanceTop: number;
   pickupCol: number;
@@ -70,7 +66,7 @@ interface LoopResizeState {
   tileId: string;
   /** Key of the grabbed instance — only this copy previews live. */
   instanceKey: string;
-  /** Content-space period offset of the grabbed instance. */
+  /** World-space period offset of the grabbed instance. */
   instanceDx: number;
   instanceDy: number;
   corner: Corner;
@@ -102,7 +98,12 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
   const halfGap = gap / 2;
   const colSize = config.unitWidth + gap;
   const rowSize = config.unitHeight + gap;
-  const period = useMemo(() => loopPeriod(config), [config]);
+
+  const tiles = api.tiles;
+  const _ = version; // subscribe
+  const period = useMemo(() => loopPeriod(config, tiles), [config, tiles]);
+  const periodRef = useRef(period);
+  periodRef.current = period;
 
   // Selection (edit mode only).
   const [internalSelection, setInternalSelection] = useState<Set<string>>(new Set());
@@ -112,12 +113,14 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
     onSelectionChange?.(next);
   }, [controlledSelection, onSelectionChange]);
 
-  // Camera + scroll plumbing.
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Camera plumbing: the PanController is the single source of truth; the
+  // rAF loop applies it to the plane transform imperatively (no re-render)
+  // and publishes a cell-quantized view for virtualization.
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const planeRef = useRef<HTMLDivElement | null>(null);
   const panRef = useRef<PanController | null>(null);
   if (!panRef.current) panRef.current = new PanController();
-  const expectedScrollRef = useRef({ x: -1, y: -1 });
-  const [view, setView] = useState<LoopView>({ sxCell: 0, syCell: 0, kax: 0, kay: 0, vw: 1000, vh: 800 });
+  const [view, setView] = useState<LoopView>({ cxCell: 0, cyCell: 0, vw: 1000, vh: 800 });
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -135,61 +138,57 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
     }
   }, [loop]);
 
-  // Native scroll deltas feed the camera. Programmatic anchor writes are
-  // excluded via expectedScrollRef.
+  // Wheel pans the camera ("native scroll" feel without scroll).
   useEffect(() => {
-    const el = scrollRef.current;
+    const el = viewportRef.current;
     if (!el) return;
-    expectedScrollRef.current = { x: el.scrollLeft, y: el.scrollTop };
-    const onScroll = () => {
-      const dx = el.scrollLeft - expectedScrollRef.current.x;
-      const dy = el.scrollTop - expectedScrollRef.current.y;
-      if (dx !== 0 || dy !== 0) {
-        panRef.current!.scrollBy(dx, dy);
-        expectedScrollRef.current = { x: el.scrollLeft, y: el.scrollTop };
-      }
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1;
+      panRef.current!.scrollBy(e.deltaX * k, e.deltaY * k);
     };
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
-  // rAF loop: advance physics, anchor the scroll position (teleporting across
-  // seams), and publish the quantized view used for rendering.
+  // Track viewport size.
   useEffect(() => {
-    const el = scrollRef.current;
+    const el = viewportRef.current;
     if (!el) return;
+    const measure = () => {
+      const vw = el.clientWidth;
+      const vh = el.clientHeight;
+      const cur = viewRef.current;
+      if (vw !== cur.vw || vh !== cur.vh) setView({ ...cur, vw, vh });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // rAF loop: advance physics, move the plane, publish the quantized view.
+  useEffect(() => {
     let raf = 0;
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       const pan = panRef.current!;
       const st = pan.tick(now);
 
-      const sx = loopAnchorScroll(st.x, period.width);
-      const sy = loopAnchorScroll(st.y, period.height);
-      if (Math.abs(el.scrollLeft - sx) > 0.5) {
-        el.scrollLeft = sx;
-        expectedScrollRef.current.x = el.scrollLeft;
+      const plane = planeRef.current;
+      if (plane) {
+        plane.style.transform = `translate3d(${-st.x}px, ${-st.y}px, 0)`;
       }
-      if (Math.abs(el.scrollTop - sy) > 0.5) {
-        el.scrollTop = sy;
-        expectedScrollRef.current.y = el.scrollTop;
+      const el = viewportRef.current;
+      if (el && showGrid) {
+        el.style.backgroundPosition = `${-st.x % colSize}px ${-st.y % rowSize}px`;
       }
 
-      const next: LoopView = {
-        sxCell: Math.floor(el.scrollLeft / colSize),
-        syCell: Math.floor(el.scrollTop / rowSize),
-        kax: Math.floor(st.x / period.width),
-        kay: Math.floor(st.y / period.height),
-        vw: el.clientWidth,
-        vh: el.clientHeight,
-      };
+      const cxCell = Math.floor(st.x / colSize);
+      const cyCell = Math.floor(st.y / rowSize);
       const cur = viewRef.current;
-      if (
-        next.sxCell !== cur.sxCell || next.syCell !== cur.syCell ||
-        next.kax !== cur.kax || next.kay !== cur.kay ||
-        next.vw !== cur.vw || next.vh !== cur.vh
-      ) {
-        setView(next);
+      if (cxCell !== cur.cxCell || cyCell !== cur.cyCell) {
+        setView({ ...cur, cxCell, cyCell });
       }
 
       const last = lastCamRef.current;
@@ -203,38 +202,21 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [period.width, period.height, colSize, rowSize]);
+  }, [colSize, rowSize, showGrid]);
 
-  const tiles = api.tiles;
-  const _ = version; // subscribe
-
-  const contentSize = useMemo(
-    () => loopContentSize(config, view.vw, view.vh),
-    [config, view.vw, view.vh],
-  );
-
-  // Visible instances, padded by a 2-cell buffer.
+  // Visible instances: camera window padded by a 2-cell buffer.
   const instances = useMemo(() => {
     const bufX = 2 * colSize;
     const bufY = 2 * rowSize;
     return loopInstances(config, tiles, {
-      x: view.sxCell * colSize - bufX,
-      y: view.syCell * rowSize - bufY,
+      x: view.cxCell * colSize - bufX,
+      y: view.cyCell * rowSize - bufY,
       width: view.vw + colSize + 2 * bufX,
       height: view.vh + rowSize + 2 * bufY,
     });
   }, [config, tiles, view, colSize, rowSize, version]);
 
-  // World-stable key: content period index + anchor period index. Survives
-  // the seam teleport (content kx shifts by -1 exactly when kax shifts by +1)
-  // so DOM nodes are reused instead of remounted.
-  const worldKey = useCallback(
-    (inst: LoopTileInstance) =>
-      `${inst.tile.id}@${inst.kx + view.kax - 1},${inst.ky + view.kay - 1}`,
-    [view.kax, view.kay],
-  );
-
-  // ---- pan gesture ('pan' interaction) -----------------------------------
+  // ---- pan gesture --------------------------------------------------------
   const panGestureRef = useRef<{
     pointerId: number;
     startX: number;
@@ -389,7 +371,7 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
             col: d.pickupCol + Math.round(dx / colSize),
             row: d.pickupRow + Math.round(dy / rowSize),
           },
-          config,
+          loopBounds(api.grid.tiles),
         );
         const result = dragControllerRef.current!.update(candidate);
         setDrag({
@@ -453,7 +435,10 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
         const tile = api.grid.getTile(r.tileId);
         let committed = false;
         if (tile) {
-          const target = wrapCell({ col: r.previewCol, row: r.previewRow }, config);
+          const target = wrapCell(
+            { col: r.previewCol, row: r.previewRow },
+            loopBounds(api.grid.tiles),
+          );
           if (target.col !== tile.col || target.row !== tile.row) {
             api.moveTile(r.tileId, target);
           }
@@ -500,7 +485,8 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
   );
 
   // FLIP for edit-mode repacks, keyed by world key. Skips the active dragger
-  // (overlay) and any apparent jump of >= half a period (seam wrap artifacts).
+  // (overlay) and any apparent jump of >= half a period (period-size changes
+  // can re-home instances).
   const prevRectsRef = useRef(new Map<string, { x: number; y: number }>());
   const tileNodes = useRef(new Map<string, HTMLDivElement>());
 
@@ -509,7 +495,7 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
     const next = new Map<string, { x: number; y: number }>();
     const draggerId = dragRef.current?.tileId ?? null;
     for (const inst of instances) {
-      const key = worldKey(inst);
+      const key = inst.key;
       next.set(key, { x: inst.left, y: inst.top });
       if (!editable || inst.tile.id === draggerId) continue;
       const p = prev.get(key);
@@ -519,8 +505,8 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
         const dy = p.y - inst.top;
         if (
           (dx !== 0 || dy !== 0) &&
-          Math.abs(dx) < period.width / 2 &&
-          Math.abs(dy) < period.height / 2
+          Math.abs(dx) < periodRef.current.width / 2 &&
+          Math.abs(dy) < periodRef.current.height / 2
         ) {
           node.style.transition = 'none';
           node.style.transform = `translate(${dx}px, ${dy}px)`;
@@ -532,7 +518,7 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
       }
     }
     prevRectsRef.current = next;
-  }, [instances, worldKey, editable, period.width, period.height]);
+  }, [instances, editable]);
 
   // Drop indicator: rendered at the period copy nearest the dragged instance.
   let indicatorRect: { left: number; top: number; width: number; height: number } | null = null;
@@ -541,6 +527,7 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
     if (t) {
       const origin = nearestInstanceOrigin(
         config,
+        tiles,
         { col: drag.indicatorCol, row: drag.indicatorRow },
         { x: drag.instanceLeft + drag.deltaX, y: drag.instanceTop + drag.deltaY },
       );
@@ -570,7 +557,7 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
 
   return (
     <div
-      ref={scrollRef}
+      ref={viewportRef}
       className={className}
       onPointerDown={(e) => {
         onContainerPointerDown(e);
@@ -579,21 +566,25 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
       onClickCapture={onContainerClickCapture}
       style={{
         position: 'relative',
-        overflow: 'auto',
+        overflow: 'hidden',
         height,
         touchAction: 'none',
         userSelect: 'none',
-        cursor: loop?.dragPan ? 'grab' : undefined,
+        cursor: !editable && loop?.dragPan ? 'grab' : undefined,
+        ['--griddle-tile-radius' as never]: `${config.tileRadius ?? 4}px`,
+        ...bgStyle,
         ...style,
       }}
     >
       <div
+        ref={planeRef}
         style={{
-          position: 'relative',
-          width: contentSize.width,
-          height: contentSize.height,
-          ['--griddle-tile-radius' as never]: `${config.tileRadius ?? 4}px`,
-          ...bgStyle,
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: 0,
+          height: 0,
+          willChange: 'transform',
         }}
       >
         {indicatorRect && (
@@ -616,7 +607,7 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
         {instances.map((inst) => {
           const tile = inst.tile;
           if (drag && tile.id === drag.tileId) return null;
-          const key = worldKey(inst);
+          const key = inst.key;
           const isResizingInst = resize?.instanceKey === inst.key;
           const isSelected = editable && selection.has(tile.id);
           const tileHandles = tile.resizeHandles ?? handles;
@@ -643,7 +634,6 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
             userSelect: 'none',
             zIndex: isResizingInst ? 10 : 1,
             opacity: isResizingInst ? 0.85 : 1,
-            willChange: 'transform',
             boxShadow: isSelected
               ? '0 0 0 3px rgba(59, 91, 219, 0.85), inset 0 0 0 1px rgba(59, 91, 219, 0.3)'
               : undefined,
