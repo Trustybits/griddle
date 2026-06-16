@@ -144,6 +144,7 @@ export class Grid {
     if (this.config.gravity && this.config.gravity !== 'none') {
       this.compactAll();
     }
+    this._structuralRepack();
   }
 
   /**
@@ -199,6 +200,7 @@ export class Grid {
 
     this.changes.emit({ type: 'add', tileIds: [tile.id] });
     if (this.config.gravity && this.config.gravity !== 'none') this.compactAll();
+    this._structuralRepack();
     return true;
   }
 
@@ -209,6 +211,17 @@ export class Grid {
     if (this.config.gravity && this.config.gravity !== 'none') {
       this.compactAll();
     }
+    this._structuralRepack();
+  }
+
+  /**
+   * Re-pack after a structural change (resize/add/remove) while looping,
+   * when opted in via `loop.repack: 'structural'`. Plain moves never repack.
+   */
+  private _structuralRepack(): void {
+    if (!loopEnabled(this.config)) return;
+    if ((this.config.loop?.repack ?? 'toggle') !== 'structural') return;
+    this.pack();
   }
 
   _setTilePos(id: string, pos: CellPos): void {
@@ -443,6 +456,7 @@ export class Grid {
 
     this.changes.emit({ type: 'resize', tileIds: [id] });
     if (this.config.gravity && this.config.gravity !== 'none') this.compactAll();
+    this._structuralRepack();
     return true;
   }
 
@@ -533,6 +547,24 @@ export class Grid {
       config: { ...this.config },
       tiles: this.tiles.map((t) => ({ ...t })),
     };
+  }
+
+  /**
+   * Replace this grid's config and tiles with a snapshot, in bulk. Unlike
+   * add/remove/resize this has no side effects (no gravity compaction, no
+   * structural repack, no pack-on-toggle) — the stored layout is restored
+   * verbatim. Emits a single 'load' event.
+   */
+  loadJSON(snap: GridSnapshot): void {
+    if (snap.version !== 1) {
+      throw new Error(`Griddle: unsupported snapshot version ${snap.version}`);
+    }
+    const next = defaultConfig(snap.config);
+    assertLoopable(next);
+    this.config = next;
+    this.tilesById.clear();
+    for (const t of snap.tiles) this.tilesById.set(t.id, { ...t });
+    this.changes.emit({ type: 'load', tileIds: this.tiles.map((t) => t.id) });
   }
 
   static fromJSON(snap: GridSnapshot): Grid {

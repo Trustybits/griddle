@@ -29,16 +29,18 @@
           v-if="!(drag && inst.tile.id === drag.tileId)"
           :data-griddle-tile="inst.tile.id"
           :data-griddle-instance="inst.key"
+          :data-griddle-ghost="isGhost(inst) ? '' : undefined"
+          :aria-hidden="isBase(inst) ? undefined : true"
           :class="['griddle-tile', {
             'griddle-resizing': resize?.instanceKey === inst.key,
-            'griddle-selected': editable && selection.has(inst.tile.id),
+            'griddle-selected': editable && isBase(inst) && selection.has(inst.tile.id),
           }]"
           :style="instanceStyle(inst)"
           :ref="(el) => registerNode(inst.key, el as HTMLDivElement | null)"
           @pointerdown="(e) => onTilePointerDown(e, inst)"
         >
-          <slot name="tile" :tile="inst.tile" :selected="editable && selection.has(inst.tile.id)" />
-          <template v-if="editable && inst.tile.resizable !== false">
+          <slot name="tile" :tile="inst.tile" :selected="editable && isBase(inst) && selection.has(inst.tile.id)" />
+          <template v-if="editable && isBase(inst) && inst.tile.resizable !== false">
             <div
               v-for="c in tileHandles(inst.tile)"
               :key="c"
@@ -71,12 +73,9 @@ import type { CameraState, CellPos, Corner, Tile } from '@griddle/core';
 import {
   DragController,
   PanController,
-  loopBounds,
   loopInstances,
   loopPeriod,
-  nearestInstanceOrigin,
   resolveLoop,
-  wrapCell,
 } from '@griddle/core';
 import type { LoopTileInstance } from '@griddle/core';
 import type { GriddleApi } from './useGriddle.js';
@@ -244,8 +243,16 @@ function syncTiles() {
   props.api.version.value++;
 }
 
+function isBase(inst: LoopTileInstance): boolean {
+  return inst.kx === 0 && inst.ky === 0;
+}
+function isGhost(inst: LoopTileInstance): boolean {
+  return editable.value && !isBase(inst);
+}
+
 function onTilePointerDown(e: PointerEvent, inst: LoopTileInstance) {
   if (!editable.value) return; // pan mode: container pan handler takes it
+  if (!isBase(inst)) return; // ghosts are display-only
   const tile = inst.tile;
   if (tile.draggable === false) return;
   if ((e.target as HTMLElement).dataset.griddleHandle) return;
@@ -329,15 +336,13 @@ function onPointerMove(e: PointerEvent) {
 
   const d = drag.value;
   if (d) {
+    // Ghost edit: plain grid semantics in the base copy — no wrapping.
     const dx = e.clientX - dragStartPointerX;
     const dy = e.clientY - dragStartPointerY;
-    const candidate: CellPos = wrapCell(
-      {
-        col: d.pickupCol + Math.round(dx / colSize.value),
-        row: d.pickupRow + Math.round(dy / rowSize.value),
-      },
-      loopBounds(props.api.grid.tiles),
-    );
+    const candidate: CellPos = {
+      col: d.pickupCol + Math.round(dx / colSize.value),
+      row: d.pickupRow + Math.round(dy / rowSize.value),
+    };
     const result = dragController.update(candidate);
     drag.value = {
       ...d,
@@ -397,10 +402,7 @@ function onPointerUp(e: PointerEvent) {
     const t = props.api.grid.getTile(r.tileId);
     let committed = false;
     if (t) {
-      const target = wrapCell(
-        { col: r.previewCol, row: r.previewRow },
-        loopBounds(props.api.grid.tiles),
-      );
+      const target = { col: r.previewCol, row: r.previewRow };
       if (target.col !== t.col || target.row !== t.row) {
         props.api.moveTile(r.tileId, target);
       }
@@ -538,7 +540,8 @@ function instanceStyle(inst: LoopTileInstance) {
     width = r.previewW * config.value.unitWidth + (r.previewW - 1) * gap.value;
     heightPx = r.previewH * config.value.unitHeight + (r.previewH - 1) * gap.value;
   }
-  const isSelected = editable.value && selection.value.has(inst.tile.id);
+  const ghost = isGhost(inst);
+  const isSelected = editable.value && isBase(inst) && selection.value.has(inst.tile.id);
   return {
     position: 'absolute' as const,
     left: left + 'px',
@@ -546,10 +549,13 @@ function instanceStyle(inst: LoopTileInstance) {
     width: width + 'px',
     height: heightPx + 'px',
     boxSizing: 'border-box' as const,
-    cursor: editable.value ? 'grab' : undefined,
+    cursor: editable.value && isBase(inst) ? 'grab' : undefined,
     userSelect: 'none' as const,
+    // Ghosts are display-only: pointer-transparent (so the gesture falls
+    // through to drag-pan) and dimmed to mark the editable copy.
+    pointerEvents: ghost ? ('none' as const) : undefined,
     zIndex: isResizingInst ? 10 : 1,
-    opacity: isResizingInst ? 0.85 : 1,
+    opacity: isResizingInst ? 0.85 : ghost ? 0.55 : 1,
     boxShadow: isSelected
       ? '0 0 0 3px rgba(59, 91, 219, 0.85), inset 0 0 0 1px rgba(59, 91, 219, 0.3)'
       : '',
@@ -583,20 +589,15 @@ const dragOverlayStyle = computed(() => {
   };
 });
 
+// Drop indicator: rendered in the base copy (ghost edit is plain-grid).
 const indicatorRect = computed(() => {
   const d = drag.value;
   if (!d || d.indicatorCol === null || d.indicatorRow === null) return null;
   const t = props.api.grid.getTile(d.tileId);
   if (!t) return null;
-  const origin = nearestInstanceOrigin(
-    config.value,
-    props.api.tiles.value,
-    { col: d.indicatorCol, row: d.indicatorRow },
-    { x: d.instanceLeft + d.deltaX, y: d.instanceTop + d.deltaY },
-  );
   return {
-    left: origin.left,
-    top: origin.top,
+    left: d.indicatorCol * colSize.value + halfGap.value,
+    top: d.indicatorRow * rowSize.value + halfGap.value,
     width: t.w * config.value.unitWidth + (t.w - 1) * gap.value,
     height: t.h * config.value.unitHeight + (t.h - 1) * gap.value,
   };

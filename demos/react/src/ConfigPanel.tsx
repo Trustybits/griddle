@@ -191,6 +191,59 @@ export function ConfigPanel(props: {
             </select>
           </div>
           <div style={row}>
+            <span style={label}>Pattern</span>
+            <select
+              style={select}
+              value={cfg.loop?.pattern ?? 'grid'}
+              onChange={(e) =>
+                api.updateConfig({
+                  loop: { ...cfg.loop, enabled: true, pattern: e.target.value as 'grid' | 'brick' | 'drop' },
+                })
+              }
+            >
+              <option value="grid">grid (aligned)</option>
+              <option value="brick">brick (row shift)</option>
+              <option value="drop">drop (column shift)</option>
+            </select>
+          </div>
+          {(cfg.loop?.pattern === 'brick' || cfg.loop?.pattern === 'drop') && (
+            <div style={row}>
+              <span style={label}>Pattern offset (0–1)</span>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={cfg.loop?.offset ?? 0.5}
+                onChange={(e) =>
+                  api.updateConfig({
+                    loop: {
+                      ...cfg.loop,
+                      enabled: true,
+                      offset: Math.min(1, Math.max(0, parseFloat(e.target.value) || 0)),
+                    },
+                  })
+                }
+              />
+            </div>
+          )}
+          <div style={row}>
+            <span style={label}>Repack</span>
+            <select
+              style={select}
+              value={cfg.loop?.repack ?? 'toggle'}
+              onChange={(e) =>
+                api.updateConfig({
+                  loop: { ...cfg.loop, enabled: true, repack: e.target.value as 'toggle' | 'structural' },
+                })
+              }
+            >
+              <option value="toggle">on toggle only</option>
+              <option value="structural">after resize/add/remove</option>
+            </select>
+          </div>
+          <div style={row}>
             <span style={label}>Friction (1/s)</span>
             <input
               style={input}

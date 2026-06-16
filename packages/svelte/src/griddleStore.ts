@@ -47,11 +47,7 @@ export function createGriddle(init: UseGriddleInit): GriddleApi {
     removeTile: (id) => grid.removeTile(id),
     updateConfig: (patch) => grid.updateConfig(patch),
     toJSON: () => grid.toJSON(),
-    loadJSON: (snap) => {
-      grid.restoreTiles(new Map());
-      grid.updateConfig(snap.config);
-      for (const t of snap.tiles) grid.addTile(t);
-    },
+    loadJSON: (snap) => grid.loadJSON(snap),
     destroy: () => off(),
   };
 }

@@ -49,10 +49,11 @@ export {
   wrapCell,
   loopBounds,
   loopPeriod,
+  loopShift,
   loopInstances,
-  nearestInstanceOrigin,
   resolveLoop,
   type LoopBounds,
+  type LoopPattern,
   type LoopTileInstance,
   type ResolvedLoop,
 } from './loop.js';

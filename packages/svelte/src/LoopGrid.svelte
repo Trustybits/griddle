@@ -8,12 +8,9 @@
   import {
     DragController,
     PanController,
-    loopBounds,
     loopInstances,
     loopPeriod,
-    nearestInstanceOrigin,
     resolveLoop,
-    wrapCell,
   } from '@griddle/core';
   import type { LoopTileInstance } from '@griddle/core';
   import type { GriddleApi } from './griddleStore.js';
@@ -164,8 +161,13 @@
   }
   let resize: LoopResizeState | null = null;
 
+  function isBase(inst: LoopTileInstance): boolean {
+    return inst.kx === 0 && inst.ky === 0;
+  }
+
   function onTilePointerDown(e: PointerEvent, inst: LoopTileInstance) {
     if (!editable) return; // pan mode: container pan handler takes it
+    if (!isBase(inst)) return; // ghosts are display-only
     const tile = inst.tile;
     if (tile.draggable === false) return;
     if ((e.target as HTMLElement).dataset.griddleHandle) return;
@@ -237,15 +239,13 @@
     }
 
     if (drag) {
+      // Ghost edit: plain grid semantics in the base copy — no wrapping.
       const dx = e.clientX - dragStartPointerX;
       const dy = e.clientY - dragStartPointerY;
-      const candidate: CellPos = wrapCell(
-        {
-          col: drag.pickupCol + Math.round(dx / colSize),
-          row: drag.pickupRow + Math.round(dy / rowSize),
-        },
-        loopBounds(api.grid.tiles),
-      );
+      const candidate: CellPos = {
+        col: drag.pickupCol + Math.round(dx / colSize),
+        row: drag.pickupRow + Math.round(dy / rowSize),
+      };
       const result = dragController.update(candidate);
       drag = {
         ...drag,
@@ -305,10 +305,7 @@
       const t = api.grid.getTile(r.tileId);
       let committed = false;
       if (t) {
-        const target = wrapCell(
-          { col: r.previewCol, row: r.previewRow },
-          loopBounds(api.grid.tiles),
-        );
+        const target = { col: r.previewCol, row: r.previewRow };
         if (target.col !== t.col || target.row !== t.row) {
           api.moveTile(r.tileId, target);
         }
@@ -408,19 +405,14 @@
   }
 
   // ---- drop indicator + drag overlay ---------------------------------------
+  // Indicator renders in the base copy (ghost edit is plain-grid).
   $: indicatorRect = (() => {
     if (!drag || drag.indicatorCol === null || drag.indicatorRow === null) return null;
     const t = api.grid.getTile(drag.tileId);
     if (!t) return null;
-    const origin = nearestInstanceOrigin(
-      cfg,
-      tilesAll,
-      { col: drag.indicatorCol, row: drag.indicatorRow },
-      { x: drag.instanceLeft + drag.deltaX, y: drag.instanceTop + drag.deltaY },
-    );
     return {
-      left: origin.left,
-      top: origin.top,
+      left: drag.indicatorCol * colSize + halfGap,
+      top: drag.indicatorRow * rowSize + halfGap,
       width: t.w * cfg.unitWidth + (t.w - 1) * gapPx,
       height: t.h * cfg.unitHeight + (t.h - 1) * gapPx,
     };
@@ -466,12 +458,16 @@
     {/if}
     {#each instances.filter((i) => !(drag && i.tile.id === drag.tileId)) as inst (inst.key)}
       {@const layout = instanceLayout(inst, resize)}
+      {@const ghost = editable && !isBase(inst)}
       <div
         class="griddle-tile"
-        class:griddle-editable={editable}
+        class:griddle-editable={editable && isBase(inst)}
+        class:griddle-ghost={ghost}
         class:griddle-resizing={resize?.instanceKey === inst.key}
         data-griddle-tile={inst.tile.id}
         data-griddle-instance={inst.key}
+        data-griddle-ghost={ghost ? '' : undefined}
+        aria-hidden={isBase(inst) ? undefined : true}
         use:registerNode={inst.key}
         on:pointerdown={(e) => onTilePointerDown(e, inst)}
         style:left={layout.left + 'px'}
@@ -480,7 +476,7 @@
         style:height={layout.height + 'px'}
       >
         <slot name="tile" tile={inst.tile} />
-        {#if editable && inst.tile.resizable !== false}
+        {#if editable && isBase(inst) && inst.tile.resizable !== false}
           {#each (inst.tile.resizeHandles ?? cfg.resizeHandles ?? ['se']) as c (c)}
             <div
               class="griddle-handle griddle-handle-{c}"
@@ -540,6 +536,12 @@
   }
   .griddle-tile.griddle-editable {
     cursor: grab;
+  }
+  /* Ghost repeats are display-only: pointer-transparent (the gesture falls
+     through to drag-pan) and dimmed to mark the editable copy. */
+  .griddle-tile.griddle-ghost {
+    pointer-events: none;
+    opacity: 0.55;
   }
   .griddle-tile.griddle-resizing {
     z-index: 10;

@@ -10,9 +10,12 @@
 // Interactions:
 // - 'pan'  — drag anywhere pans the camera with configurable physics. Tiles
 //            are view-only (no drag / resize / selection / draw-create).
-// - 'edit' — tiles drag-n-drop as usual; drop cells wrap across the seam.
-//            Wheel pans, and dragging the background pans (tiles capture
-//            their own pointerdown).
+// - 'edit' — "ghost edit": only the base copy (kx=0, ky=0) is interactive,
+//            with ordinary non-wrapped grid semantics (drag, resize,
+//            selection). The surrounding repeats render live but are
+//            pointer-transparent ghosts (data-griddle-ghost, dimmed), so
+//            seams preview in real time while editing stays plain-grid.
+//            Wheel pans, and dragging anywhere outside the base copy pans.
 
 import {
   CSSProperties,
@@ -27,12 +30,9 @@ import type { Corner, Tile, CameraState, LoopTileInstance } from '@griddle/core'
 import {
   DragController,
   PanController,
-  loopBounds,
   loopInstances,
   loopPeriod,
-  nearestInstanceOrigin,
   resolveLoop,
-  wrapCell,
 } from '@griddle/core';
 import type { GriddleGridProps } from './GriddleGrid.js';
 import { useGridVersion } from './useGriddle.js';
@@ -272,6 +272,7 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
   const onTilePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>, inst: LoopTileInstance) => {
       if (!editable) return; // pan mode: bubble up to the container pan handler
+      if (inst.kx !== 0 || inst.ky !== 0) return; // ghosts are display-only
       const tile = inst.tile;
       if (tile.draggable === false) return;
       if ((e.target as HTMLElement).dataset.griddleHandle) return;
@@ -364,15 +365,13 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
 
       const d = dragRef.current;
       if (d) {
+        // Ghost edit: plain grid semantics in the base copy — no wrapping.
         const dx = e.clientX - dragStartPointerRef.current.x;
         const dy = e.clientY - dragStartPointerRef.current.y;
-        const candidate = wrapCell(
-          {
-            col: d.pickupCol + Math.round(dx / colSize),
-            row: d.pickupRow + Math.round(dy / rowSize),
-          },
-          loopBounds(api.grid.tiles),
-        );
+        const candidate = {
+          col: d.pickupCol + Math.round(dx / colSize),
+          row: d.pickupRow + Math.round(dy / rowSize),
+        };
         const result = dragControllerRef.current!.update(candidate);
         setDrag({
           ...d,
@@ -435,10 +434,7 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
         const tile = api.grid.getTile(r.tileId);
         let committed = false;
         if (tile) {
-          const target = wrapCell(
-            { col: r.previewCol, row: r.previewRow },
-            loopBounds(api.grid.tiles),
-          );
+          const target = { col: r.previewCol, row: r.previewRow };
           if (target.col !== tile.col || target.row !== tile.row) {
             api.moveTile(r.tileId, target);
           }
@@ -520,20 +516,14 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
     prevRectsRef.current = next;
   }, [instances, editable]);
 
-  // Drop indicator: rendered at the period copy nearest the dragged instance.
+  // Drop indicator: rendered in the base copy (ghost edit is plain-grid).
   let indicatorRect: { left: number; top: number; width: number; height: number } | null = null;
   if (drag && drag.indicatorCol !== null && drag.indicatorRow !== null) {
     const t = api.grid.getTile(drag.tileId);
     if (t) {
-      const origin = nearestInstanceOrigin(
-        config,
-        tiles,
-        { col: drag.indicatorCol, row: drag.indicatorRow },
-        { x: drag.instanceLeft + drag.deltaX, y: drag.instanceTop + drag.deltaY },
-      );
       indicatorRect = {
-        left: origin.left,
-        top: origin.top,
+        left: drag.indicatorCol * colSize + halfGap,
+        top: drag.indicatorRow * rowSize + halfGap,
         width: t.w * config.unitWidth + (t.w - 1) * gap,
         height: t.h * config.unitHeight + (t.h - 1) * gap,
       };
@@ -608,8 +598,10 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
           const tile = inst.tile;
           if (drag && tile.id === drag.tileId) return null;
           const key = inst.key;
+          const isBase = inst.kx === 0 && inst.ky === 0;
+          const isGhost = editable && !isBase;
           const isResizingInst = resize?.instanceKey === inst.key;
-          const isSelected = editable && selection.has(tile.id);
+          const isSelected = editable && isBase && selection.has(tile.id);
           const tileHandles = tile.resizeHandles ?? handles;
 
           let left = inst.left;
@@ -630,10 +622,13 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
             width,
             height: heightPx,
             boxSizing: 'border-box',
-            cursor: editable ? 'grab' : undefined,
+            cursor: editable && isBase ? 'grab' : undefined,
             userSelect: 'none',
+            // Ghosts are display-only: pointer-transparent (so the gesture
+            // falls through to drag-pan) and dimmed to mark the editable copy.
+            pointerEvents: isGhost ? 'none' : undefined,
             zIndex: isResizingInst ? 10 : 1,
-            opacity: isResizingInst ? 0.85 : 1,
+            opacity: isResizingInst ? 0.85 : isGhost ? 0.55 : 1,
             boxShadow: isSelected
               ? '0 0 0 3px rgba(59, 91, 219, 0.85), inset 0 0 0 1px rgba(59, 91, 219, 0.3)'
               : undefined,
@@ -649,11 +644,13 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
               }}
               data-griddle-tile={tile.id}
               data-griddle-instance={key}
+              data-griddle-ghost={isGhost ? '' : undefined}
+              aria-hidden={isBase ? undefined : true}
               onPointerDown={(e) => onTilePointerDown(e, inst)}
               style={tileStyle}
             >
               {renderTile(tile, isSelected)}
-              {editable && tile.resizable !== false &&
+              {editable && isBase && tile.resizable !== false &&
                 tileHandles.map((c) => (
                   <div
                     key={c}

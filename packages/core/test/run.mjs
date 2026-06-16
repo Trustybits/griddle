@@ -10,8 +10,8 @@ import {
   wrapCell,
   loopBounds,
   loopPeriod,
+  loopShift,
   loopInstances,
-  nearestInstanceOrigin,
   resolveLoop,
   PanController,
 } from '../dist/index.js';
@@ -466,12 +466,87 @@ test('Loop: loopInstances skips out-of-flow tiles', () => {
   eq(out[0].tile.id, 'a');
 });
 
-test('Loop: nearestInstanceOrigin picks the copy near the point', () => {
-  const cfg = { cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 };
-  // Marker at (3,3) -> bounds 4x4, period 200. Cell (1,1) base origin (50,50).
-  const tiles = [{ id: 'z', col: 3, row: 3, w: 1, h: 1 }];
-  const near = nearestInstanceOrigin(cfg, tiles, { col: 1, row: 1 }, { x: 460, y: 70 });
-  deepEq(near, { left: 450, top: 50 });
+test('Loop: brick pattern shifts each repeat row horizontally', () => {
+  // One 1x1 tile at origin with a 2x1 marker -> bounds 4x1, period 200x50.
+  const cfg = {
+    cols: 4, rows: 4, unitWidth: 50, unitHeight: 50,
+    loop: { enabled: true, pattern: 'brick', offset: 0.5 },
+  };
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 1, h: 1 },
+    { id: 'z', col: 3, row: 0, w: 1, h: 1 },
+  ];
+  deepEq(loopShift(cfg, tiles), { x: 100, y: 0 }); // 0.5 * 4 cols * 50px
+  const out = loopInstances(cfg, tiles, { x: 0, y: 0, width: 200, height: 100 });
+  const a00 = out.find((i) => i.key === 'a@0,0');
+  const a01 = out.find((i) => i.key === 'a@0,1');
+  deepEq({ left: a00.left, top: a00.top }, { left: 0, top: 0 });
+  // Repeat row ky=1 is shifted right by half the period.
+  deepEq({ left: a01.left, top: a01.top }, { left: 100, top: 50 });
+});
+
+test('Loop: drop pattern shifts each repeat column vertically', () => {
+  const cfg = {
+    cols: 4, rows: 4, unitWidth: 50, unitHeight: 50,
+    loop: { enabled: true, pattern: 'drop', offset: 0.5 },
+  };
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 1, h: 1 },
+    { id: 'z', col: 0, row: 3, w: 1, h: 1 }, // bounds 1x4, period 50x200
+  ];
+  deepEq(loopShift(cfg, tiles), { x: 0, y: 100 });
+  const out = loopInstances(cfg, tiles, { x: 0, y: 0, width: 100, height: 200 });
+  const a10 = out.find((i) => i.key === 'a@1,0');
+  // Repeat column kx=1 is shifted down by half the period.
+  deepEq({ left: a10.left, top: a10.top }, { left: 50, top: 100 });
+});
+
+test('Loop: grid pattern has no shift', () => {
+  const cfg = {
+    cols: 4, rows: 4, unitWidth: 50, unitHeight: 50,
+    loop: { enabled: true },
+  };
+  const tiles = [{ id: 'a', col: 0, row: 0, w: 1, h: 1 }];
+  deepEq(loopShift(cfg, tiles), { x: 0, y: 0 });
+});
+
+test('Loop: structural repack runs after resize/add, never after moves', () => {
+  const holes = (g) => {
+    const b = loopBounds(g.tiles);
+    const area = g.tiles.reduce((s, t) => s + t.w * t.h, 0);
+    return b.cols * b.rows - area;
+  };
+  const mk = (repack) => new Grid(
+    {
+      cols: 6, rows: 12, unitWidth: 50, unitHeight: 50,
+      loop: { enabled: true, repack },
+    },
+    [
+      { id: 'a', col: 0, row: 0, w: 1, h: 1 },
+      { id: 'b', col: 0, row: 1, w: 1, h: 1 },
+    ],
+  );
+
+  // Default ('toggle'): growing a to 3x1 leaves b stranded under it — the
+  // bounding box gains holes and stays that way (no repack).
+  const g1 = mk(undefined);
+  g1.resizeTile('a', { w: 3, h: 1 });
+  assert(holes(g1) > 0, 'toggle mode must not repack after resize');
+
+  // 'structural': the same edit ends densely packed ([a 3x1][b] in one row).
+  const g2 = mk('structural');
+  g2.resizeTile('a', { w: 3, h: 1 });
+  eq(holes(g2), 0, 'structural repack must leave no holes');
+  deepEq(loopBounds(g2.tiles), { cols: 4, rows: 1 });
+
+  // Moves never trigger repack even with 'structural'.
+  const g3 = mk('structural');
+  g3.moveTile('b', { col: 4, row: 5 });
+  deepEq({ col: g3.getTile('b').col, row: g3.getTile('b').row }, { col: 4, row: 5 });
+
+  // Adds trigger repack with 'structural'.
+  g3.addTile({ id: 'c', col: 5, row: 9, w: 1, h: 1 });
+  eq(holes(g3), 0, 'add must repack densely under structural');
 });
 
 test('Loop: resolveLoop applies defaults', () => {
@@ -481,6 +556,9 @@ test('Loop: resolveLoop applies defaults', () => {
   eq(pan.interaction, 'pan');
   assert(pan.dragPan);
   eq(pan.friction, 4);
+  eq(pan.pattern, 'grid');
+  eq(pan.offset, 0.5);
+  eq(pan.repack, 'toggle');
   const edit = resolveLoop({
     cols: 4, rows: 4, unitWidth: 50, unitHeight: 50,
     loop: { enabled: true, interaction: 'edit', physics: { friction: 7 } },

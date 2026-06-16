@@ -134,11 +134,37 @@ export interface LoopConfig {
   /**
    * - 'pan'  — view-only gallery: dragging anywhere pans the camera (with the
    *            physics below); tile drag/resize/draw-create are disabled.
-   * - 'edit' — tiles drag-n-drop as usual (drop cells wrap across the seam);
-   *            the camera moves via wheel or background drag.
+   * - 'edit' — "ghost edit": the base copy of the content is an ordinary,
+   *            non-wrapped grid surface with normal drag/resize semantics;
+   *            the surrounding repeats render live but are non-interactive
+   *            (pointer-transparent ghosts). The camera moves via wheel or
+   *            by dragging anywhere outside the base copy.
    * Default 'pan'.
    */
   interaction?: 'pan' | 'edit';
+  /**
+   * How repeats are laid out relative to each other:
+   * - 'grid'  — repeats aligned in both axes (default).
+   * - 'brick' — each successive repeat row shifts horizontally by
+   *             `offset` x period width (running-bond brickwork).
+   * - 'drop'  — each successive repeat column shifts vertically by
+   *             `offset` x period height (half-drop wallpaper).
+   */
+  pattern?: 'grid' | 'brick' | 'drop';
+  /**
+   * Shift fraction for 'brick'/'drop' patterns, 0..1 of the period (rounded
+   * to whole cells). 0.5 = classic half-brick / half-drop; other fractions
+   * produce staircase / diagonal tessellations. Default 0.5.
+   */
+  offset?: number;
+  /**
+   * When packing runs (see Grid.pack):
+   * - 'toggle'     — only on the loop off->on transition (default).
+   * - 'structural' — additionally after resize / add / remove while looping
+   *                  (never after plain moves, so arrangements made by
+   *                  dragging are not shuffled).
+   */
+  repack?: 'toggle' | 'structural';
   /** Pan physics tuning. Only meaningful for 'pan' interaction. */
   physics?: LoopPhysicsConfig;
 }

@@ -54,7 +54,7 @@ export default function App() {
 const api = useGriddle({
   config: {
     cols: 12, rows: 12, unitWidth: 120, unitHeight: 120,
-    loop: { enabled: true, interaction: 'pan' }, // 'pan' = viewer, 'edit' = owner
+    loop: { enabled: true, interaction: 'pan' }, // 'pan' = viewer, 'edit' = ghost edit
   },
   tiles,
 });
@@ -64,8 +64,10 @@ const api = useGriddle({
 The content repeats infinitely in both directions — drag to pan with momentum
 (physics configurable) or use the wheel/trackpad; there is no native scrolling
 and no scrollbars. Enabling loop auto-packs tiles into a dense block so the
-repeats are seamless. In `'edit'` mode tiles stay drag-n-droppable and drop
-positions wrap across the seam. See `docs/loop.md`.
+repeats are seamless; `pattern: 'brick' | 'drop'` offsets the repeats for
+brickwork / half-drop tessellations. In `'edit'` mode the base copy is an
+ordinary editable grid while the repeats render as live, non-interactive
+ghosts. See `docs/loop.md`.
 
 ## Headless (core only)
 

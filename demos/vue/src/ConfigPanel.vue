@@ -142,6 +142,26 @@
           <option value="edit">edit (owner)</option>
         </select>
       </div>
+      <div :style="row"><span :style="label">Pattern</span>
+        <select :style="selectStyle" :value="cfg.loop?.pattern ?? 'grid'"
+          @change="(e) => patchLoop({ pattern: (e.target as HTMLSelectElement).value as 'grid' | 'brick' | 'drop' })">
+          <option value="grid">grid (aligned)</option>
+          <option value="brick">brick (row shift)</option>
+          <option value="drop">drop (column shift)</option>
+        </select>
+      </div>
+      <div v-if="cfg.loop?.pattern === 'brick' || cfg.loop?.pattern === 'drop'" :style="row">
+        <span :style="label">Pattern offset (0–1)</span>
+        <input :style="inputStyle" type="number" min="0" max="1" step="0.05" :value="cfg.loop?.offset ?? 0.5"
+          @input="(e) => patchLoop({ offset: Math.min(1, Math.max(0, parseFloat((e.target as HTMLInputElement).value) || 0)) })"/>
+      </div>
+      <div :style="row"><span :style="label">Repack</span>
+        <select :style="selectStyle" :value="cfg.loop?.repack ?? 'toggle'"
+          @change="(e) => patchLoop({ repack: (e.target as HTMLSelectElement).value as 'toggle' | 'structural' })">
+          <option value="toggle">on toggle only</option>
+          <option value="structural">after resize/add/remove</option>
+        </select>
+      </div>
       <div :style="row"><span :style="label">Friction (1/s)</span>
         <input :style="inputStyle" type="number" min="0.5" step="0.5" :value="cfg.loop?.physics?.friction ?? 4"
           @input="(e) => patchLoopPhysics({ friction: parseFloat((e.target as HTMLInputElement).value) || 4 })"/>

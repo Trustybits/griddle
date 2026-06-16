@@ -24,6 +24,9 @@ export interface LoopBounds {
   rows: number;
 }
 
+/** Repeat pattern: aligned grid, brick (row shift), or drop (column shift). */
+export type LoopPattern = 'grid' | 'brick' | 'drop';
+
 /** True when loop mode is on. */
 export function loopEnabled(config: GridConfig): boolean {
   return config.loop?.enabled === true;
@@ -112,10 +115,34 @@ export interface LoopTileInstance {
 }
 
 /**
+ * Pattern shift in pixels per repeat index, rounded to whole cells so gaps
+ * stay aligned. Brick shifts each repeat *row* horizontally; drop shifts
+ * each repeat *column* vertically; grid shifts nothing.
+ */
+export function loopShift(
+  config: GridConfig,
+  tiles: Tile[],
+): { x: number; y: number } {
+  const loop = resolveLoop(config);
+  if (!loop || loop.pattern === 'grid') return { x: 0, y: 0 };
+  const gap = config.gap ?? 0;
+  const b = loopBounds(tiles);
+  if (loop.pattern === 'brick') {
+    return { x: Math.round(loop.offset * b.cols) * (config.unitWidth + gap), y: 0 };
+  }
+  return { x: 0, y: Math.round(loop.offset * b.rows) * (config.unitHeight + gap) };
+}
+
+/**
  * Compute the tile instances visible in `view` (a world-space pixel rect,
  * typically the camera window padded by a small buffer). Each in-flow tile
  * yields one instance per period copy that intersects the view — the same
  * tile can appear more than once when the view is larger than the period.
+ *
+ * Copy origins form a (possibly sheared) lattice:
+ *   left = base.x + kx * periodW + ky * shiftX   (shiftX != 0 for 'brick')
+ *   top  = base.y + ky * periodH + kx * shiftY   (shiftY != 0 for 'drop')
+ * The base copy (kx = 0, ky = 0) is always unshifted.
  *
  * Out-of-flow tiles (`absolute`/`fixed`/`sticky`) do not loop; they are
  * excluded here and should be layered by the adapter as usual.
@@ -130,6 +157,14 @@ export function loopInstances(
   const colSize = config.unitWidth + gap;
   const rowSize = config.unitHeight + gap;
   const period = loopPeriod(config, tiles);
+  const shift = loopShift(config, tiles);
+
+  // Smallest k with copy end > lo and largest k with copy start < hi
+  // (half-open view rect, hence the +1 / -1).
+  const kRange = (start: number, size: number, step: number, lo: number, hi: number) => ({
+    k0: Math.floor((lo - start - size) / step) + 1,
+    k1: Math.ceil((hi - start) / step) - 1,
+  });
 
   const out: LoopTileInstance[] = [];
   for (const tile of tiles) {
@@ -139,62 +174,47 @@ export function loopInstances(
     const width = tile.w * config.unitWidth + (tile.w - 1) * gap;
     const height = tile.h * config.unitHeight + (tile.h - 1) * gap;
 
-    // Period indices whose copy [baseLeft + kx*pw, +width) intersects the
-    // half-open view rect: smallest k with copyRight > view.x and largest k
-    // with copyLeft < view.x + view.width (strict, hence ceil - 1).
-    const kx0 = Math.floor((view.x - baseLeft - width) / period.width) + 1;
-    const kx1 = Math.ceil((view.x + view.width - baseLeft) / period.width) - 1;
-    const ky0 = Math.floor((view.y - baseTop - height) / period.height) + 1;
-    const ky1 = Math.ceil((view.y + view.height - baseTop) / period.height) - 1;
+    const push = (kx: number, ky: number) => {
+      out.push({
+        tile,
+        key: `${tile.id}@${kx},${ky}`,
+        kx,
+        ky,
+        left: baseLeft + kx * period.width + ky * shift.x,
+        top: baseTop + ky * period.height + kx * shift.y,
+        width,
+        height,
+      });
+    };
 
-    for (let ky = ky0; ky <= ky1; ky++) {
-      for (let kx = kx0; kx <= kx1; kx++) {
-        out.push({
-          tile,
-          key: `${tile.id}@${kx},${ky}`,
-          kx,
-          ky,
-          left: baseLeft + kx * period.width,
-          top: baseTop + ky * period.height,
-          width,
-          height,
-        });
+    if (shift.y !== 0) {
+      // 'drop': vertical placement depends on kx — outer loop over columns.
+      const xs = kRange(baseLeft, width, period.width, view.x, view.x + view.width);
+      for (let kx = xs.k0; kx <= xs.k1; kx++) {
+        const top0 = baseTop + kx * shift.y;
+        const ys = kRange(top0, height, period.height, view.y, view.y + view.height);
+        for (let ky = ys.k0; ky <= ys.k1; ky++) push(kx, ky);
+      }
+    } else {
+      // 'grid' and 'brick': horizontal placement may depend on ky.
+      const ys = kRange(baseTop, height, period.height, view.y, view.y + view.height);
+      for (let ky = ys.k0; ky <= ys.k1; ky++) {
+        const left0 = baseLeft + ky * shift.x;
+        const xs = kRange(left0, width, period.width, view.x, view.x + view.width);
+        for (let kx = xs.k0; kx <= xs.k1; kx++) push(kx, ky);
       }
     }
   }
   return out;
 }
 
-/**
- * World-space pixel position of the period copy of cell `pos` nearest to
- * the world-space point `near`. Used to render drop indicators next to the
- * instance the user is actually dragging rather than in the base period.
- */
-export function nearestInstanceOrigin(
-  config: GridConfig,
-  tiles: Tile[],
-  pos: CellPos,
-  near: { x: number; y: number },
-): { left: number; top: number } {
-  const gap = config.gap ?? 0;
-  const halfGap = gap / 2;
-  const colSize = config.unitWidth + gap;
-  const rowSize = config.unitHeight + gap;
-  const bounds = loopBounds(tiles);
-  const period = loopPeriod(config, tiles);
-  const baseLeft = wrapValue(pos.col, bounds.cols) * colSize + halfGap;
-  const baseTop = wrapValue(pos.row, bounds.rows) * rowSize + halfGap;
-  const kx = Math.round((near.x - baseLeft) / period.width);
-  const ky = Math.round((near.y - baseTop) / period.height);
-  return {
-    left: baseLeft + kx * period.width,
-    top: baseTop + ky * period.height,
-  };
-}
-
 /** Resolved loop settings with defaults applied. */
 export interface ResolvedLoop {
   interaction: 'pan' | 'edit';
+  pattern: LoopPattern;
+  /** Shift fraction for brick/drop, clamped to [0, 1]. */
+  offset: number;
+  repack: 'toggle' | 'structural';
   dragPan: boolean;
   friction: number;
   ease: number;
@@ -204,16 +224,20 @@ export interface ResolvedLoop {
 /**
  * Apply defaults to a LoopConfig. Returns null when loop mode is off.
  *
- * `dragPan` defaults to true in both interactions: in 'edit' mode tiles
- * capture their own pointerdown (drag-n-drop), so drag-to-pan only engages
- * from the background — without it, touch users couldn't move the plane at
- * all since there is no native scrolling in loop mode.
+ * `dragPan` defaults to true in both interactions: in 'edit' mode the base
+ * copy's tiles capture their own pointerdown (drag-n-drop) and the ghost
+ * repeats are pointer-transparent, so drag-to-pan engages everywhere else —
+ * without it, touch users couldn't move the plane at all since there is no
+ * native scrolling in loop mode.
  */
 export function resolveLoop(config: GridConfig): ResolvedLoop | null {
   const loop: LoopConfig | undefined = config.loop;
   if (!loop?.enabled) return null;
   return {
     interaction: loop.interaction ?? 'pan',
+    pattern: loop.pattern ?? 'grid',
+    offset: Math.min(1, Math.max(0, loop.offset ?? 0.5)),
+    repack: loop.repack ?? 'toggle',
     dragPan: loop.physics?.dragPan ?? true,
     friction: loop.physics?.friction ?? 4,
     ease: loop.physics?.ease ?? 12,
