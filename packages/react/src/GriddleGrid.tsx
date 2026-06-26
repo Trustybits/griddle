@@ -17,9 +17,11 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import type { GriddleApi } from './useGriddle.js';
-import type { Corner, Tile } from '@griddle/core';
+import type { CameraState, Corner, Tile } from '@griddle/core';
+import { GriddleLoopGrid } from './LoopGrid.js';
 import {
   visibleRange,
   visibleTiles,
@@ -57,6 +59,12 @@ export interface GriddleGridProps {
   onResizeStart?: (tileId: string) => void;
   /** Called when a resize gesture ends. `committed` is true if the tile resized. */
   onResizeEnd?: (tileId: string, committed: boolean) => void;
+  /**
+   * Loop mode only: fires whenever the camera moves (offset, velocity,
+   * isMoving, isDragging). Use it to drive velocity-based visual effects.
+   * Called from the render loop — keep the handler cheap.
+   */
+  onCameraChange?: (camera: CameraState) => void;
 }
 
 interface DragVisual {
@@ -110,7 +118,22 @@ interface DrawState {
 
 const DEFAULT_DRAG_IGNORE = 'a, button, input, textarea, select, [contenteditable]';
 
+/**
+ * Renders the grid. When `config.loop.enabled` is set, delegates to the
+ * loop-mode renderer (infinitely repeating plane); otherwise renders the
+ * standard scrollable grid. Toggling loop at runtime remounts the surface.
+ */
 export function GriddleGrid(props: GriddleGridProps) {
+  const loopOn = useSyncExternalStore(
+    (cb) => props.api.grid.changes.on(() => cb()),
+    () => props.api.config.loop?.enabled === true,
+    () => props.api.config.loop?.enabled === true,
+  );
+  if (loopOn) return <GriddleLoopGrid {...props} />;
+  return <GriddleStaticGrid {...props} />;
+}
+
+function GriddleStaticGrid(props: GriddleGridProps) {
   const {
     api, renderTile, className, style, height = '100%', showGrid = true,
     selection: controlledSelection, onSelectionChange, onDrawCreate,

@@ -1,5 +1,24 @@
 <template>
+  <GriddleLoopGrid
+    v-if="loopOn"
+    :api="api"
+    :class-name="className"
+    :height="height"
+    :show-grid="showGrid"
+    :selection="props.selection"
+    @selection-change="(s) => emit('selectionChange', s)"
+    @drag-start="(id) => emit('dragStart', id)"
+    @drag-end="(id, c) => emit('dragEnd', id, c)"
+    @resize-start="(id) => emit('resizeStart', id)"
+    @resize-end="(id, c) => emit('resizeEnd', id, c)"
+    @camera-change="(cam) => emit('cameraChange', cam)"
+  >
+    <template #tile="slotProps">
+      <slot name="tile" v-bind="slotProps" />
+    </template>
+  </GriddleLoopGrid>
   <div
+    v-else
     ref="scrollEl"
     :class="className"
     :style="scrollStyle"
@@ -63,7 +82,7 @@
         <slot name="tile" :tile="tile" :selected="selection.has(tile.id)" />
         <template v-if="tile.resizable !== false">
           <div
-            v-for="c in (tile.resizeHandles ?? config.resizeHandles ?? ['se'])"
+            v-for="c in tileHandles(tile)"
             :key="c"
             :data-griddle-handle="c"
             :style="handleStyle(c)"
@@ -77,7 +96,8 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue';
-import type { Corner, Tile } from '@griddle/core';
+import type { CameraState, Corner, Tile } from '@griddle/core';
+import GriddleLoopGrid from './LoopGrid.vue';
 import {
   visibleRange,
   visibleTiles,
@@ -108,7 +128,11 @@ const emit = defineEmits<{
   (e: 'dragEnd', tileId: string, committed: boolean): void;
   (e: 'resizeStart', tileId: string): void;
   (e: 'resizeEnd', tileId: string, committed: boolean): void;
+  (e: 'cameraChange', camera: CameraState): void;
 }>();
+
+/** Loop mode delegates rendering to GriddleLoopGrid. */
+const loopOn = computed(() => props.api.config.value.loop?.enabled === true);
 
 const scrollEl = ref<HTMLDivElement | null>(null);
 const viewport = ref({ scrollX: 0, scrollY: 0, width: 1000, height: 800 });
@@ -459,7 +483,8 @@ function onPointerUp() {
     const { committed } = groupDragController.end();
     groupDrag.value = null;
     syncTiles();
-    if (tileIds.length > 0) emit('dragEnd', tileIds[0], committed);
+    const firstId = tileIds[0];
+    if (firstId !== undefined) emit('dragEnd', firstId, committed);
   }
   if (drag.value) {
     const tileId = drag.value.tileId;
@@ -506,10 +531,13 @@ function onKeyDown(e: KeyboardEvent) {
 let ro: ResizeObserver | null = null;
 onMounted(() => {
   updateViewport();
-  const el = scrollEl.value!;
-  el.addEventListener('scroll', updateViewport, { passive: true });
-  ro = new ResizeObserver(updateViewport);
-  ro.observe(el);
+  // scrollEl is absent while loop mode delegates to GriddleLoopGrid.
+  const el = scrollEl.value;
+  if (el) {
+    el.addEventListener('scroll', updateViewport, { passive: true });
+    ro = new ResizeObserver(updateViewport);
+    ro.observe(el);
+  }
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);
   window.addEventListener('pointercancel', onPointerUp);
@@ -686,6 +714,10 @@ const drawGhostRect = computed(() => {
     label: `${w}×${h}`,
   };
 });
+
+function tileHandles(tile: Tile): Corner[] {
+  return tile.resizeHandles ?? config.value.resizeHandles ?? ['se'];
+}
 
 function handleStyle(c: Corner) {
   const size = 12;

@@ -61,6 +61,43 @@
     const el = e.currentTarget as HTMLInputElement;
     api.updateConfig({ snapDuringDrag: el.checked });
   }
+  function setLoopEnabled(e: Event) {
+    const el = e.currentTarget as HTMLInputElement;
+    if (el.checked) {
+      api.updateConfig({
+        // Loop requires a finite period on both axes.
+        cols: cfg.cols === Infinity ? 12 : cfg.cols,
+        rows: cfg.rows === Infinity ? 12 : cfg.rows,
+        infiniteX: false,
+        infiniteY: false,
+        loop: { ...cfg.loop, enabled: true },
+      });
+    } else {
+      api.updateConfig({ loop: { ...cfg.loop, enabled: false } });
+    }
+  }
+  function setLoopInteraction(e: Event) {
+    const el = e.currentTarget as HTMLSelectElement;
+    api.updateConfig({ loop: { ...cfg.loop, enabled: true, interaction: el.value as 'pan' | 'edit' } });
+  }
+  function setLoopPattern(e: Event) {
+    const el = e.currentTarget as HTMLSelectElement;
+    api.updateConfig({ loop: { ...cfg.loop, enabled: true, pattern: el.value as 'grid' | 'brick' | 'drop' } });
+  }
+  function setLoopOffset(e: Event) {
+    const el = e.currentTarget as HTMLInputElement;
+    const v = Math.min(1, Math.max(0, parseFloat(el.value) || 0));
+    api.updateConfig({ loop: { ...cfg.loop, enabled: true, offset: v } });
+  }
+  function setLoopRepack(e: Event) {
+    const el = e.currentTarget as HTMLSelectElement;
+    api.updateConfig({ loop: { ...cfg.loop, enabled: true, repack: el.value as 'toggle' | 'structural' } });
+  }
+  function setLoopPhysics(patch: { friction?: number; ease?: number; maxVelocity?: number }) {
+    api.updateConfig({
+      loop: { ...cfg.loop, enabled: true, physics: { ...cfg.loop?.physics, ...patch } },
+    });
+  }
   function exportJson() {
     jsonText = JSON.stringify(api.toJSON(), null, 2);
   }
@@ -121,6 +158,49 @@
       {/each}
     </div>
   </div>
+
+  <div class="h">Loop</div>
+  <div class="row"><span>Loop (infinite repeat)</span>
+    <input type="checkbox" checked={cfg.loop?.enabled === true} on:change={setLoopEnabled}/>
+  </div>
+  {#if cfg.loop?.enabled}
+    <div class="row"><span>Interaction</span>
+      <select value={cfg.loop?.interaction ?? 'pan'} on:change={setLoopInteraction}>
+        <option value="pan">pan (viewer)</option>
+        <option value="edit">edit (owner)</option>
+      </select>
+    </div>
+    <div class="row"><span>Pattern</span>
+      <select value={cfg.loop?.pattern ?? 'grid'} on:change={setLoopPattern}>
+        <option value="grid">grid (aligned)</option>
+        <option value="brick">brick (row shift)</option>
+        <option value="drop">drop (column shift)</option>
+      </select>
+    </div>
+    {#if cfg.loop?.pattern === 'brick' || cfg.loop?.pattern === 'drop'}
+      <div class="row"><span>Pattern offset (0–1)</span>
+        <input type="number" min="0" max="1" step="0.05" value={cfg.loop?.offset ?? 0.5} on:input={setLoopOffset}/>
+      </div>
+    {/if}
+    <div class="row"><span>Repack</span>
+      <select value={cfg.loop?.repack ?? 'toggle'} on:change={setLoopRepack}>
+        <option value="toggle">on toggle only</option>
+        <option value="structural">after resize/add/remove</option>
+      </select>
+    </div>
+    <div class="row"><span>Friction (1/s)</span>
+      <input type="number" min="0.5" step="0.5" value={cfg.loop?.physics?.friction ?? 4}
+        on:input={(e) => setLoopPhysics({ friction: parseFloat(e.currentTarget.value) || 4 })}/>
+    </div>
+    <div class="row"><span>Ease (1/s)</span>
+      <input type="number" min="1" step="1" value={cfg.loop?.physics?.ease ?? 12}
+        on:input={(e) => setLoopPhysics({ ease: parseFloat(e.currentTarget.value) || 12 })}/>
+    </div>
+    <div class="row"><span>Max velocity (px/s)</span>
+      <input type="number" min="100" step="500" value={cfg.loop?.physics?.maxVelocity ?? 6000}
+        on:input={(e) => setLoopPhysics({ maxVelocity: parseFloat(e.currentTarget.value) || 6000 })}/>
+    </div>
+  {/if}
 
   <div class="h">Add tile</div>
   <div class="row"><span>Size</span>

@@ -91,6 +91,84 @@ export interface Tile extends CellPos, Footprint {
   sticky?: StickyConfig;
 }
 
+/**
+ * Physics knobs for drag-to-pan in loop mode. All rates are per-second so
+ * behavior is frame-rate independent.
+ */
+export interface LoopPhysicsConfig {
+  /**
+   * Whether drag-to-pan is active. Default true. In 'edit' mode tiles capture
+   * their own pointer drags, so drag-to-pan only engages from the background.
+   */
+  dragPan?: boolean;
+  /**
+   * Exponential decay rate of the inertia velocity after release (1/s).
+   * Higher stops sooner. Default 4.
+   */
+  friction?: number;
+  /**
+   * Rate at which the camera eases toward its target (1/s). Higher feels
+   * stiffer / more direct. Default 12.
+   */
+  ease?: number;
+  /** Clamp on fling velocity, in px/s. Default 6000. */
+  maxVelocity?: number;
+}
+
+/**
+ * Loop mode: the packed content (bounding box of the in-flow tiles) repeats
+ * infinitely in both axes ("object looping" — tiles wrap around the camera so
+ * the plane has no edges). There is no native scrolling: the viewport is
+ * overflow-hidden and wheel/drag input drives a transform camera.
+ *
+ * The loop off->on toggle (and only that toggle) packs tiles into a dense
+ * block so repeats are seamless; already-dense layouts are kept as arranged.
+ * Packing is independent of all other layout strategies — it never runs on
+ * tile moves, drags, creates, resizes, snapshot loads, or toggling loop off
+ * (the packed layout simply persists).
+ * Requires finite cols/rows; incompatible with infiniteX/infiniteY.
+ */
+export interface LoopConfig {
+  /** Master switch, like gravity. Default false. */
+  enabled: boolean;
+  /**
+   * - 'pan'  — view-only gallery: dragging anywhere pans the camera (with the
+   *            physics below); tile drag/resize/draw-create are disabled.
+   * - 'edit' — "ghost edit": the base copy of the content is an ordinary,
+   *            non-wrapped grid surface with normal drag/resize semantics;
+   *            the surrounding repeats render live but are non-interactive
+   *            (pointer-transparent ghosts). The camera moves via wheel or
+   *            by dragging anywhere outside the base copy.
+   * Default 'pan'.
+   */
+  interaction?: 'pan' | 'edit';
+  /**
+   * How repeats are laid out relative to each other:
+   * - 'grid'  — repeats aligned in both axes (default).
+   * - 'brick' — each successive repeat row shifts horizontally by
+   *             `offset` x period width (running-bond brickwork).
+   * - 'drop'  — each successive repeat column shifts vertically by
+   *             `offset` x period height (half-drop wallpaper).
+   */
+  pattern?: 'grid' | 'brick' | 'drop';
+  /**
+   * Shift fraction for 'brick'/'drop' patterns, 0..1 of the period (rounded
+   * to whole cells). 0.5 = classic half-brick / half-drop; other fractions
+   * produce staircase / diagonal tessellations. Default 0.5.
+   */
+  offset?: number;
+  /**
+   * When packing runs (see Grid.pack):
+   * - 'toggle'     — only on the loop off->on transition (default).
+   * - 'structural' — additionally after resize / add / remove while looping
+   *                  (never after plain moves, so arrangements made by
+   *                  dragging are not shuffled).
+   */
+  repack?: 'toggle' | 'structural';
+  /** Pan physics tuning. Only meaningful for 'pan' interaction. */
+  physics?: LoopPhysicsConfig;
+}
+
 /** Grid configuration. */
 export interface GridConfig {
   /** Columns. Use Infinity for horizontally infinite canvas. */
@@ -151,6 +229,11 @@ export interface GridConfig {
    * `'a, button, input, textarea, select, [contenteditable], .my-caption'`.
    */
   dragIgnoreFrom?: string;
+  /**
+   * Loop mode — the finite grid tiles repeat infinitely in both axes.
+   * Off by default. See LoopConfig.
+   */
+  loop?: LoopConfig;
 }
 
 /** A rectangle in cells (inclusive col,row; exclusive col+w,row+h). */

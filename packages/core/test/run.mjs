@@ -1,7 +1,20 @@
 // Handwritten test runner. No dependencies — just node.
 // Run with: node packages/core/test/run.mjs (from repo root)
 
-import { Grid, priorityDirections, rectsAdjacent, footprintEquals } from '../dist/index.js';
+import {
+  Grid,
+  priorityDirections,
+  rectsAdjacent,
+  footprintEquals,
+  wrapValue,
+  wrapCell,
+  loopBounds,
+  loopPeriod,
+  loopShift,
+  loopInstances,
+  resolveLoop,
+  PanController,
+} from '../dist/index.js';
 
 let passed = 0;
 let failed = 0;
@@ -379,6 +392,356 @@ test('resizeTile grows and displaces neighbors', () => {
   eq(g.getTile('a').w, 2);
   const b = g.getTile('b');
   assert(!(b.col === 1 && b.row === 0));
+});
+
+// ---- Loop mode ---------------------------------------------------------
+
+test('Loop: wrapValue positive modulo', () => {
+  eq(wrapValue(5, 10), 5);
+  eq(wrapValue(15, 10), 5);
+  eq(wrapValue(-3, 10), 7);
+  eq(wrapValue(-10, 10), 0);
+  eq(wrapValue(0, 10), 0);
+});
+
+test('Loop: wrapCell wraps into base period', () => {
+  const bounds = { cols: 12, rows: 8 };
+  deepEq(wrapCell({ col: 13, row: -1 }, bounds), { col: 1, row: 7 });
+  deepEq(wrapCell({ col: -12, row: 8 }, bounds), { col: 0, row: 0 });
+});
+
+test('Loop: loopBounds is the content bounding box', () => {
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 2, h: 1 },
+    { id: 'b', col: 3, row: 2, w: 2, h: 2 },
+    // Out-of-flow tiles are excluded.
+    { id: 'p', col: 50, row: 50, w: 1, h: 1, position: 'absolute', pinned: { x: 0, y: 0 } },
+  ];
+  deepEq(loopBounds(tiles), { cols: 5, rows: 4 });
+  deepEq(loopBounds([]), { cols: 1, rows: 1 });
+});
+
+test('Loop: loopPeriod derives from content, includes gap', () => {
+  const cfg = { cols: 10, rows: 5, unitWidth: 50, unitHeight: 40, gap: 4 };
+  // Tiles only span 4 cols x 2 rows of the 10x5 grid: period is the content,
+  // not the configured grid, so repeats have no dead space between them.
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 2, h: 2 },
+    { id: 'b', col: 2, row: 0, w: 2, h: 2 },
+  ];
+  deepEq(loopPeriod(cfg, tiles), { width: 4 * 54, height: 2 * 44 });
+});
+
+test('Loop: loopInstances returns one copy per visible period', () => {
+  const cfg = { cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 };
+  // Marker tile at (3,3) makes the content bounding box 4x4 -> period 200x200.
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 1, h: 1 },
+    { id: 'z', col: 3, row: 3, w: 1, h: 1 },
+  ];
+  // View covering exactly the second period.
+  const one = loopInstances(cfg, tiles, { x: 200, y: 200, width: 200, height: 200 })
+    .filter((i) => i.tile.id === 'a');
+  eq(one.length, 1);
+  eq(one[0].key, 'a@1,1');
+  eq(one[0].left, 200);
+  eq(one[0].top, 200);
+  // View spanning a seam horizontally -> two copies.
+  const two = loopInstances(cfg, tiles, { x: 190, y: 200, width: 220, height: 100 })
+    .filter((i) => i.tile.id === 'a');
+  eq(two.length, 2);
+  const keys = two.map((i) => i.key).sort();
+  deepEq(keys, ['a@1,1', 'a@2,1']);
+});
+
+test('Loop: loopInstances skips out-of-flow tiles', () => {
+  const cfg = { cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 };
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 1, h: 1 },
+    { id: 'p', col: 0, row: 0, w: 1, h: 1, position: 'absolute', pinned: { x: 0, y: 0 } },
+  ];
+  // Bounds from 'a' alone -> period 50x50; view of one period -> one copy.
+  const out = loopInstances(cfg, tiles, { x: 0, y: 0, width: 50, height: 50 });
+  eq(out.length, 1);
+  eq(out[0].tile.id, 'a');
+});
+
+test('Loop: brick pattern shifts each repeat row horizontally', () => {
+  // One 1x1 tile at origin with a 2x1 marker -> bounds 4x1, period 200x50.
+  const cfg = {
+    cols: 4, rows: 4, unitWidth: 50, unitHeight: 50,
+    loop: { enabled: true, pattern: 'brick', offset: 0.5 },
+  };
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 1, h: 1 },
+    { id: 'z', col: 3, row: 0, w: 1, h: 1 },
+  ];
+  deepEq(loopShift(cfg, tiles), { x: 100, y: 0 }); // 0.5 * 4 cols * 50px
+  const out = loopInstances(cfg, tiles, { x: 0, y: 0, width: 200, height: 100 });
+  const a00 = out.find((i) => i.key === 'a@0,0');
+  const a01 = out.find((i) => i.key === 'a@0,1');
+  deepEq({ left: a00.left, top: a00.top }, { left: 0, top: 0 });
+  // Repeat row ky=1 is shifted right by half the period.
+  deepEq({ left: a01.left, top: a01.top }, { left: 100, top: 50 });
+});
+
+test('Loop: drop pattern shifts each repeat column vertically', () => {
+  const cfg = {
+    cols: 4, rows: 4, unitWidth: 50, unitHeight: 50,
+    loop: { enabled: true, pattern: 'drop', offset: 0.5 },
+  };
+  const tiles = [
+    { id: 'a', col: 0, row: 0, w: 1, h: 1 },
+    { id: 'z', col: 0, row: 3, w: 1, h: 1 }, // bounds 1x4, period 50x200
+  ];
+  deepEq(loopShift(cfg, tiles), { x: 0, y: 100 });
+  const out = loopInstances(cfg, tiles, { x: 0, y: 0, width: 100, height: 200 });
+  const a10 = out.find((i) => i.key === 'a@1,0');
+  // Repeat column kx=1 is shifted down by half the period.
+  deepEq({ left: a10.left, top: a10.top }, { left: 50, top: 100 });
+});
+
+test('Loop: grid pattern has no shift', () => {
+  const cfg = {
+    cols: 4, rows: 4, unitWidth: 50, unitHeight: 50,
+    loop: { enabled: true },
+  };
+  const tiles = [{ id: 'a', col: 0, row: 0, w: 1, h: 1 }];
+  deepEq(loopShift(cfg, tiles), { x: 0, y: 0 });
+});
+
+test('Loop: structural repack runs after resize/add, never after moves', () => {
+  const holes = (g) => {
+    const b = loopBounds(g.tiles);
+    const area = g.tiles.reduce((s, t) => s + t.w * t.h, 0);
+    return b.cols * b.rows - area;
+  };
+  const mk = (repack) => new Grid(
+    {
+      cols: 6, rows: 12, unitWidth: 50, unitHeight: 50,
+      loop: { enabled: true, repack },
+    },
+    [
+      { id: 'a', col: 0, row: 0, w: 1, h: 1 },
+      { id: 'b', col: 0, row: 1, w: 1, h: 1 },
+    ],
+  );
+
+  // Default ('toggle'): growing a to 3x1 leaves b stranded under it — the
+  // bounding box gains holes and stays that way (no repack).
+  const g1 = mk(undefined);
+  g1.resizeTile('a', { w: 3, h: 1 });
+  assert(holes(g1) > 0, 'toggle mode must not repack after resize');
+
+  // 'structural': the same edit ends densely packed ([a 3x1][b] in one row).
+  const g2 = mk('structural');
+  g2.resizeTile('a', { w: 3, h: 1 });
+  eq(holes(g2), 0, 'structural repack must leave no holes');
+  deepEq(loopBounds(g2.tiles), { cols: 4, rows: 1 });
+
+  // Moves never trigger repack even with 'structural'.
+  const g3 = mk('structural');
+  g3.moveTile('b', { col: 4, row: 5 });
+  deepEq({ col: g3.getTile('b').col, row: g3.getTile('b').row }, { col: 4, row: 5 });
+
+  // Adds trigger repack with 'structural'.
+  g3.addTile({ id: 'c', col: 5, row: 9, w: 1, h: 1 });
+  eq(holes(g3), 0, 'add must repack densely under structural');
+});
+
+test('Loop: resolveLoop applies defaults', () => {
+  const off = resolveLoop({ cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 });
+  eq(off, null);
+  const pan = resolveLoop({ cols: 4, rows: 4, unitWidth: 50, unitHeight: 50, loop: { enabled: true } });
+  eq(pan.interaction, 'pan');
+  assert(pan.dragPan);
+  eq(pan.friction, 4);
+  eq(pan.pattern, 'grid');
+  eq(pan.offset, 0.5);
+  eq(pan.repack, 'toggle');
+  const edit = resolveLoop({
+    cols: 4, rows: 4, unitWidth: 50, unitHeight: 50,
+    loop: { enabled: true, interaction: 'edit', physics: { friction: 7 } },
+  });
+  eq(edit.interaction, 'edit');
+  assert(edit.dragPan, 'edit mode drag-pans from the background by default');
+  eq(edit.friction, 7);
+  const noPan = resolveLoop({
+    cols: 4, rows: 4, unitWidth: 50, unitHeight: 50,
+    loop: { enabled: true, physics: { dragPan: false } },
+  });
+  assert(!noPan.dragPan, 'physics.dragPan: false disables drag-to-pan');
+});
+
+test('Loop: Grid.pack compacts tiles into a dense block', () => {
+  const g = new Grid(
+    { cols: 4, rows: 12, unitWidth: 50, unitHeight: 50 },
+    [
+      { id: 'a', col: 0, row: 4, w: 2, h: 2 },
+      { id: 'b', col: 3, row: 9, w: 1, h: 1 },
+      { id: 'c', col: 2, row: 4, w: 2, h: 1 },
+    ],
+  );
+  g.pack();
+  // Reading order: a (row 4), c (row 4, col 2), b (row 9).
+  // a -> (0,0); c -> (2,0); b -> first free scanning row 0: (2,1).
+  const a = g.getTile('a');
+  const c = g.getTile('c');
+  const b = g.getTile('b');
+  deepEq({ col: a.col, row: a.row }, { col: 0, row: 0 });
+  deepEq({ col: c.col, row: c.row }, { col: 2, row: 0 });
+  deepEq({ col: b.col, row: b.row }, { col: 2, row: 1 });
+  deepEq(loopBounds(g.tiles), { cols: 4, rows: 2 });
+});
+
+test('Loop: pack finds a hole-free tiling when one exists', () => {
+  // The React demo's default tile set: 20 cells of area — tiles a 10x2
+  // rectangle exactly, so pack must produce zero holes.
+  const g = new Grid(
+    { cols: 12, rows: 12, unitWidth: 50, unitHeight: 50 },
+    [
+      { id: '1', col: 0, row: 0, w: 2, h: 2 },
+      { id: '2', col: 2, row: 0, w: 1, h: 1 },
+      { id: '3', col: 3, row: 0, w: 3, h: 1 },
+      { id: '4', col: 6, row: 0, w: 1, h: 2 },
+      { id: '5', col: 7, row: 0, w: 2, h: 2 },
+      { id: '6', col: 0, row: 2, w: 1, h: 1 },
+      { id: '7', col: 1, row: 2, w: 1, h: 1 },
+      { id: '8', col: 9, row: 0, w: 1, h: 1 },
+      { id: '9', col: 10, row: 0, w: 1, h: 1 },
+      { id: '10', col: 2, row: 1, w: 2, h: 1 },
+    ],
+  );
+  g.pack();
+  const tiles = g.tiles;
+  const area = tiles.reduce((s, t) => s + t.w * t.h, 0);
+  const b = loopBounds(tiles);
+  eq(b.cols * b.rows, area, 'bounding box must have zero holes');
+  // No overlaps.
+  for (let i = 0; i < tiles.length; i++) {
+    for (let j = i + 1; j < tiles.length; j++) {
+      const a = tiles[i], c = tiles[j];
+      const overlap =
+        a.col < c.col + c.w && c.col < a.col + a.w &&
+        a.row < c.row + c.h && c.row < a.row + a.h;
+      assert(!overlap, `tiles ${a.id} and ${c.id} overlap`);
+    }
+  }
+});
+
+test('Loop: pack preserves an already-dense layout', () => {
+  // A hand-packed perfect 10x2 rectangle: pack must not move anything.
+  const layout = [
+    { id: '1', col: 0, row: 0, w: 2, h: 2 },
+    { id: '2', col: 2, row: 0, w: 1, h: 1 },
+    { id: '3', col: 3, row: 0, w: 3, h: 1 },
+    { id: '10', col: 2, row: 1, w: 2, h: 1 },
+    { id: '7', col: 4, row: 1, w: 1, h: 1 },
+    { id: '6', col: 5, row: 1, w: 1, h: 1 },
+    { id: '4', col: 6, row: 0, w: 1, h: 2 },
+    { id: '5', col: 7, row: 0, w: 2, h: 2 },
+    { id: '8', col: 9, row: 0, w: 1, h: 1 },
+    { id: '9', col: 9, row: 1, w: 1, h: 1 },
+  ];
+  const g = new Grid({ cols: 12, rows: 12, unitWidth: 50, unitHeight: 50 }, layout);
+  const movedAny = g.pack();
+  assert(!movedAny, 'pack must not touch a perfectly dense layout');
+  for (const t of layout) {
+    const cur = g.getTile(t.id);
+    deepEq({ col: cur.col, row: cur.row }, { col: t.col, row: t.row });
+  }
+});
+
+test('Loop: pack translates an offset dense layout to the origin', () => {
+  const g = new Grid(
+    { cols: 12, rows: 12, unitWidth: 50, unitHeight: 50 },
+    [
+      { id: 'a', col: 3, row: 2, w: 2, h: 1 },
+      { id: 'b', col: 5, row: 2, w: 1, h: 1 },
+    ],
+  );
+  const movedAny = g.pack();
+  assert(movedAny, 'offset layout must be translated');
+  deepEq({ col: g.getTile('a').col, row: g.getTile('a').row }, { col: 0, row: 0 });
+  deepEq({ col: g.getTile('b').col, row: g.getTile('b').row }, { col: 2, row: 0 });
+});
+
+test('Loop: enabling loop auto-packs the layout', () => {
+  const g = new Grid(
+    { cols: 4, rows: 12, unitWidth: 50, unitHeight: 50 },
+    [
+      { id: 'a', col: 0, row: 6, w: 1, h: 1 },
+      { id: 'b', col: 3, row: 2, w: 1, h: 1 },
+    ],
+  );
+  g.updateConfig({ loop: { enabled: true } });
+  const bounds = loopBounds(g.tiles);
+  deepEq(bounds, { cols: 2, rows: 1 });
+});
+
+test('Loop: pack fires only on the off->on toggle', () => {
+  // Constructing (or loading a snapshot) with loop already enabled respects
+  // the stored layout as-is — no auto-pack.
+  const g = new Grid(
+    { cols: 4, rows: 12, unitWidth: 50, unitHeight: 50, loop: { enabled: true } },
+    [
+      { id: 'a', col: 0, row: 6, w: 1, h: 1 },
+      { id: 'b', col: 3, row: 2, w: 1, h: 1 },
+    ],
+  );
+  deepEq({ col: g.getTile('a').col, row: g.getTile('a').row }, { col: 0, row: 6 });
+  deepEq({ col: g.getTile('b').col, row: g.getTile('b').row }, { col: 3, row: 2 });
+  // Other config changes while looping do not repack.
+  g.updateConfig({ gap: 8 });
+  deepEq({ col: g.getTile('a').col, row: g.getTile('a').row }, { col: 0, row: 6 });
+  // Moving a tile while looping uses the normal pipeline — no repack.
+  g.moveTile('b', { col: 2, row: 6 });
+  deepEq({ col: g.getTile('b').col, row: g.getTile('b').row }, { col: 2, row: 6 });
+  deepEq({ col: g.getTile('a').col, row: g.getTile('a').row }, { col: 0, row: 6 });
+  // Toggling loop OFF does not repack either; the layout simply stays.
+  g.updateConfig({ loop: { enabled: false } });
+  deepEq({ col: g.getTile('a').col, row: g.getTile('a').row }, { col: 0, row: 6 });
+  deepEq({ col: g.getTile('b').col, row: g.getTile('b').row }, { col: 2, row: 6 });
+});
+
+test('Loop: Grid rejects loop + infinite axes', () => {
+  let threw = false;
+  try {
+    new Grid({ cols: 12, rows: Infinity, unitWidth: 50, unitHeight: 50, loop: { enabled: true } });
+  } catch {
+    threw = true;
+  }
+  assert(threw, 'constructor must reject loop with infinite rows');
+  const g = new Grid({ cols: 12, rows: 12, unitWidth: 50, unitHeight: 50 });
+  let threw2 = false;
+  try {
+    g.updateConfig({ infiniteY: true, loop: { enabled: true } });
+  } catch {
+    threw2 = true;
+  }
+  assert(threw2, 'updateConfig must reject loop with infiniteY');
+});
+
+test('Loop: PanController drag pans opposite pointer and flings on release', () => {
+  const pan = new PanController();
+  pan.dragStart(100, 100, 0);
+  pan.dragMove(60, 100, 16); // finger left 40px -> camera right
+  pan.dragEnd(16);
+  // Advance simulation 2s in 16ms steps.
+  let st;
+  for (let t = 32; t <= 2000; t += 16) st = pan.tick(t);
+  assert(st.x > 40, `camera should coast past the drag distance, got ${st.x}`);
+  assert(Math.abs(st.y) < 1e-6, 'no vertical motion');
+  assert(!st.isMoving, 'camera settles');
+});
+
+test('Loop: PanController scrollBy moves camera directly', () => {
+  const pan = new PanController();
+  pan.scrollBy(120, -30);
+  const st = pan.tick(16);
+  eq(st.x, 120);
+  eq(st.y, -30);
+  assert(!st.isDragging);
 });
 
 // ---- Report -----------------------------------------------------------

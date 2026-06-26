@@ -1,6 +1,6 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { GriddleGrid, useGriddle } from '@griddle/react';
-import type { Tile } from '@griddle/core';
+import type { CameraState, Tile } from '@griddle/core';
 import { ConfigPanel } from './ConfigPanel.js';
 import { DemoTile } from './Tile.js';
 
@@ -59,6 +59,10 @@ export function App() {
     api.grid.addTileWithDisplacement({ id, ...rect });
   };
 
+  // Loop-mode camera readout (drives any custom velocity-based effects).
+  const [camera, setCamera] = useState<CameraState | null>(null);
+  const loopOn = api.config.loop?.enabled === true;
+
   return (
     <div style={{ display: 'flex', height: '100%' }}>
       <ConfigPanel api={api} onAddTile={handleAdd} nextId={() => String(nextIdRef.current++)} />
@@ -67,7 +71,28 @@ export function App() {
           api={api}
           renderTile={(t, _selected) => <DemoTile tile={t} onRemove={handleRemove} />}
           onDrawCreate={handleDrawCreate}
+          onCameraChange={setCamera}
         />
+        {loopOn && camera && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 12,
+              right: 12,
+              padding: '6px 10px',
+              background: 'rgba(20,24,33,0.78)',
+              color: 'white',
+              borderRadius: 6,
+              fontSize: 11,
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              pointerEvents: 'none',
+            }}
+          >
+            cam {Math.round(camera.x)},{Math.round(camera.y)}
+            {' · '}v {Math.round(Math.hypot(camera.vx, camera.vy))} px/s
+            {camera.isDragging ? ' · dragging' : camera.isMoving ? ' · coasting' : ' · idle'}
+          </div>
+        )}
       </div>
     </div>
   );
