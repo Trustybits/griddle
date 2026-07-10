@@ -1,27 +1,60 @@
 {
   "name": "@griddle/svelte",
   "version": "0.1.0",
+  "description": "Svelte bindings for Griddle — a headless, zero-dependency grid/canvas engine.",
+  "keywords": [
+    "grid",
+    "canvas",
+    "layout",
+    "drag-and-drop",
+    "drag",
+    "resize",
+    "headless",
+    "virtualization",
+    "tiles",
+    "svelte"
+  ],
+  "homepage": "https://github.com/Trustybits/griddle#readme",
+  "bugs": {
+    "url": "https://github.com/Trustybits/griddle/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Trustybits/griddle.git",
+    "directory": "packages/svelte"
+  },
+  "license": "MIT",
+  "author": "Trustybits",
   "type": "module",
-  "main": "./src/index.ts",
-  "module": "./src/index.ts",
-  "svelte": "./src/index.ts",
+  "sideEffects": ["**/*.svelte", "**/*.css"],
+  "svelte": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "svelte": "./src/index.ts",
-      "import": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "svelte": "./dist/index.js"
     }
   },
-  "files": ["src"],
+  "files": ["dist"],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "echo 'Svelte adapter is distributed as source (consumed by SFC compiler in user project).'"
+    "build": "svelte-package -i src -o dist",
+    "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
-    "svelte": "^4.0.0 || ^5.0.0",
-    "@griddle/core": "*"
+    "@griddle/core": "^0.1.0",
+    "svelte": "^4.0.0 || ^5.0.0"
   },
   "devDependencies": {
+    "@griddle/core": "^0.1.0",
+    "@sveltejs/package": "^2.5.8",
     "svelte": "^4.2.0",
-    "@griddle/core": "*"
+    "svelte-check": "^4.7.2",
+    "svelte-preprocess": "^5.1.0"
   }
 }

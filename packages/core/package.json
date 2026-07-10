@@ -2,7 +2,32 @@
   "name": "@griddle/core",
   "version": "0.1.0",
   "description": "Headless grid/canvas engine. Zero runtime dependencies.",
+  "keywords": [
+    "grid",
+    "canvas",
+    "layout",
+    "drag-and-drop",
+    "drag",
+    "resize",
+    "headless",
+    "virtualization",
+    "tiles",
+    "packing",
+    "infinite-canvas"
+  ],
+  "homepage": "https://github.com/Trustybits/griddle#readme",
+  "bugs": {
+    "url": "https://github.com/Trustybits/griddle/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Trustybits/griddle.git",
+    "directory": "packages/core"
+  },
+  "license": "MIT",
+  "author": "Trustybits",
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,9 +38,16 @@
     }
   },
   "files": ["dist", "src"],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node test/run.mjs"
+    "test": "node test/run.mjs",
+    "prepublishOnly": "npm run build && npm test"
   },
   "devDependencies": {
     "typescript": "^5.4.0"
