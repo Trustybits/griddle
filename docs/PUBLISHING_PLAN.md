@@ -5,16 +5,32 @@ Goal: publish `@griddle/core`, `@griddle/react`, `@griddle/vue`, and
 build step for every package (including Vue and Svelte) so consumers install
 compiled, stable artifacts.
 
-This is a **plan only** — nothing here has been implemented yet. All planning
-choices are now resolved: each is marked **DECISION (made)** inline with its
-rationale and summarized in the checklist (§8). What remains for
-implementation time is the `LoopGrid` public-name sub-choice and the
-verification items in §6 (README / API-drift check, and how the `docs/` files
-get surfaced on npm).
+## Status: ✅ Executed — ready to publish
+
+This plan has been **fully implemented and verified**. All decisions (marked
+**DECISION (made)** inline, summarized in §8) are resolved and applied. Every
+package builds to a clean tarball, metadata is complete, versions are lockstep
+at `0.1.0`, and `npm publish --dry-run --workspaces` passes with no errors
+(4 publishable, 3 demos correctly skipped as private).
+
+Verified end-to-end: clean rebuild from scratch, core tests (50/50), all demos
+build, Svelte 5 compat re-checked against the shipped `dist/*.svelte`, and the
+publisher (`trustybits`) confirmed as owner of the `@griddle` org.
+
+**The only remaining step is the manual first publish** (§5.1 / §7 step 7).
+See §7 for the per-step completion status.
+
+Sub-decisions settled during execution: the public loop-component name is
+**`GriddleLoopGrid`** (§6); the `docs/` files are **referenced via repo links**
+in the per-package READMEs rather than bundled (npm omits repo-root `docs/`).
 
 ---
 
 ## 1. Current state (what the audit found)
+
+> **Note:** this section is the **pre-implementation audit** (a historical
+> snapshot). It has since been fully addressed — see the Status banner above and
+> §7 for what was done.
 
 | Package | Build today | Output | Publish-ready? |
 | --- | --- | --- | --- |
@@ -321,27 +337,29 @@ PR run `node packages/core/test/run.mjs` + `npm run build` (all packages) +
 
 ---
 
-## 7. Proposed execution order (once decisions are made)
+## 7. Execution order — status
 
-1. **Cleanup:** `git rm` the seven tracked scratch files (Section 1a); confirm
-   clean `git status`.
-2. **Vue/Svelte build:** add `tsconfig.json` (+ `svelte.config.js` as needed),
-   install build devDeps (`@sveltejs/package`, Vite/plugin-vue per DECISION),
-   replace `echo` scripts, point `exports`/`main`/`types` at `dist/`.
-3. **Metadata:** add repository/homepage/bugs/keywords/license/sideEffects/
-   engines/publishConfig, per-package `README.md` + `LICENSE`, and
-   `prepublishOnly` guards to all four.
-4. **Versioning:** convert each adapter's `@griddle/core` from `"*"` to a
-   `^0.1.0` **peer** dependency (mirror in `devDependencies`); confirm all four
-   `version` fields are `0.1.0` (lockstep). Manual — no Changesets.
-5. **Verify:** `npm run build` (all), `node packages/core/test/run.mjs`,
-   `npx vue-tsc --noEmit` in `demos/vue`, and `npm pack --dry-run` inspection of
-   every package's tarball.
-6. **Dry run:** `npm publish --dry-run --access public` per package.
-7. **First publish:** manual `npm publish --access public`, core first, then the
-   three adapters (so the core version their peer range points to exists) — per
-   the §5.1 runbook.
-8. **Optional:** add the CI PR gate (§5.3); Changesets migration later (§5.2).
+1. ✅ **Cleanup:** `git rm`'d the seven tracked scratch files (Section 1a); tree
+   clean. Added suffix-based ignores + `**/.svelte-kit/` to `.gitignore`.
+2. ✅ **Vue/Svelte build:** added `tsconfig.json` for both, `vite.config.ts`
+   (vue) and `svelte.config.js` (svelte); replaced `echo` scripts with
+   `vite build && vue-tsc` (vue) and `svelte-package` (svelte); entry points
+   repointed to `dist/`. Vue ships `dist`+`src` with maps for parity.
+3. ✅ **Metadata:** repository/homepage/bugs/keywords/license/author/sideEffects/
+   engines/publishConfig added to all four; per-package `README.md` + `LICENSE`;
+   `prepublishOnly` guards (core: build+test, adapters: build).
+4. ✅ **Versioning:** each adapter's `@griddle/core` now `^0.1.0` **peer** (mirrored
+   in `devDependencies`); all four `version` fields `0.1.0` (lockstep). Manual.
+5. ✅ **Verify:** clean `npm run build` (all), `node packages/core/test/run.mjs`
+   (50/50), `npx vue-tsc --noEmit` in `demos/vue`, all demos build, and
+   `npm pack --dry-run` inspected — tarballs clean.
+6. ✅ **Dry run:** `npm publish --dry-run --access public --workspaces` — exit 0,
+   4 publishable, 3 demos skipped (private), no errors.
+7. ⏳ **First publish (remaining):** manual `npm publish --access public`, core
+   first, then the three adapters (so the core version their peer range points to
+   exists) — per the §5.1 runbook. Publisher `trustybits` confirmed as `@griddle`
+   org owner.
+8. ⬜ **Optional (deferred):** CI PR gate (§5.3); Changesets migration (§5.2).
 
 ---
 

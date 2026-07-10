@@ -55,6 +55,15 @@ const api = useGriddle({
 });
 ```
 
+`<GriddleGrid>` automatically switches to the loop renderer when
+`config.loop.enabled` is `true`, so most apps never touch the loop component
+directly. For advanced cases where you want to render the loop plane explicitly,
+`GriddleLoopGrid` is also exported and takes the same props as `GriddleGrid`:
+
+```tsx
+import { GriddleLoopGrid } from '@griddle/react';
+```
+
 See the [main repository](https://github.com/Trustybits/griddle) for full docs.
 
 ## License

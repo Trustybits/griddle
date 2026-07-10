@@ -45,8 +45,9 @@ Thin presentation layers built on this core:
 - [`@griddle/vue`](https://www.npmjs.com/package/@griddle/vue)
 - [`@griddle/svelte`](https://www.npmjs.com/package/@griddle/svelte)
 
-See the [main repository](https://github.com/Trustybits/griddle) for the movement
-ruleset (`docs/movement.md`) and loop mode (`docs/loop.md`).
+See the full [movement ruleset](https://github.com/Trustybits/griddle/blob/master/docs/movement.md)
+and [loop mode](https://github.com/Trustybits/griddle/blob/master/docs/loop.md)
+docs, or the [main repository](https://github.com/Trustybits/griddle).
 
 ## License
 
