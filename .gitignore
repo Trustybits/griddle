@@ -3,3 +3,20 @@
 **/node_modules/
 vite.config.ts.timestamp*
 .agent/
+
+# Scratch / backup copies of source — never commit these (see AGENTS.md).
+# These match by suffix regardless of the real extension, e.g. types.ts.fix,
+# GriddleGrid.svelte.clean, positioning.ts.head.
+*.fix
+*.clean
+*.head
+*.bak
+*.tmp
+*.orig
+*.rej
+
+# Editor / OS cruft
+*.swp
+*.swo
+*~
+.DS_Store
