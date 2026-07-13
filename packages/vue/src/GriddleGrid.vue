@@ -147,12 +147,18 @@ const range = computed(() => visibleRange(config.value, viewport.value, 4));
 const rendered = computed(() => visibleTiles(props.api.tiles.value, range.value));
 const contentSize = computed(() => gridContentSize(config.value, props.api.tiles.value));
 
-const scrollStyle = computed(() => ({
-  position: 'relative' as const,
-  overflow: 'auto' as const,
-  height: props.height ?? '100%',
-  touchAction: 'none' as const,
-}));
+const scrollStyle = computed(() => {
+  // 'none' scroll mode: the grid sizes to content and lets the host page own
+  // scrolling/panning — no internal scroll box, no touch-action lock.
+  const contained = config.value.scroll !== 'none';
+  const style: Record<string, string | number> = {
+    position: 'relative',
+    overflow: contained ? 'auto' : 'visible',
+    height: contained ? (props.height ?? '100%') : (props.height ?? 'auto'),
+  };
+  if (contained) style.touchAction = 'none';
+  return style;
+});
 
 const contentStyle = computed(() => {
   const showGrid = props.showGrid !== false;
@@ -338,6 +344,9 @@ function onTilePointerDown(e: PointerEvent, tile: Tile) {
 
 function onBackgroundPointerDown(e: PointerEvent) {
   if ((e.target as HTMLElement).closest('[data-griddle-tile]')) return;
+  // Draw-to-create is gated by config (default on). When disabled, empty-space
+  // pointer-downs are a no-op so the host page keeps its native scroll/pan.
+  if (config.value.interactive?.drawToCreate === false) return;
   setSelection(new Set());
 
   const el = scrollEl.value;

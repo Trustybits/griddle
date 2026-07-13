@@ -523,6 +523,9 @@ function GriddleStaticGrid(props: GriddleGridProps) {
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if ((e.target as HTMLElement).closest('[data-griddle-tile]')) return;
+      // Draw-to-create is gated by config (default on). When disabled, empty-
+      // space pointer-downs are a no-op so the host page keeps native scroll/pan.
+      if (config.interactive?.drawToCreate === false) return;
       setSelection(new Set());
 
       const el = scrollRef.current;
@@ -535,7 +538,7 @@ function GriddleStaticGrid(props: GriddleGridProps) {
       setDrawState({ anchorCol: col, anchorRow: row, currentCol: col, currentRow: row });
       el.setPointerCapture(e.pointerId);
     },
-    [setSelection, colSize, rowSize],
+    [setSelection, colSize, rowSize, config],
   );
 
   const onResizeHandleDown = useCallback(
@@ -572,6 +575,10 @@ function GriddleStaticGrid(props: GriddleGridProps) {
     : {};
 
   const handles = config.resizeHandles ?? ['se'];
+
+  // 'none' scroll mode: the grid sizes to content and lets the host page own
+  // scrolling/panning — no internal scroll box, no touch-action lock.
+  const contained = config.scroll !== 'none';
 
   // Compute layouts for all rendered tiles in one pass so resolveStickyStacking
   // can see every sticky tile and adjust them as a group. Recomputes whenever
@@ -675,9 +682,9 @@ function GriddleStaticGrid(props: GriddleGridProps) {
       onPointerDown={onBackgroundPointerDown}
       style={{
         position: 'relative',
-        overflow: 'auto',
-        height,
-        touchAction: 'none',
+        overflow: contained ? 'auto' : 'visible',
+        height: contained ? height : (props.height ?? 'auto'),
+        ...(contained ? { touchAction: 'none' as const } : {}),
         ...style,
       }}
     >

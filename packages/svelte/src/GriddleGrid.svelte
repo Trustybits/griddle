@@ -41,6 +41,11 @@
   // Loop mode delegates rendering to LoopGrid.
   $: loopOn = cfg.loop?.enabled === true;
 
+  // 'none' scroll mode: the grid sizes to content and lets the host page own
+  // scrolling/panning — no internal scroll box, no touch-action lock.
+  $: contained = cfg.scroll !== 'none';
+  $: heightCss = typeof height === 'number' ? height + 'px' : height;
+
   $: colSize = cfg.unitWidth + (cfg.gap ?? 0);
   $: rowSize = cfg.unitHeight + (cfg.gap ?? 0);
   $: halfGap = (cfg.gap ?? 0) / 2;
@@ -409,7 +414,9 @@
 <div
   bind:this={scrollEl}
   class="griddle-scroll"
-  style:height={typeof height === 'number' ? height + 'px' : height}
+  style:overflow={contained ? 'auto' : 'visible'}
+  style:touch-action={contained ? 'none' : 'auto'}
+  style:height={contained ? heightCss : 'auto'}
 >
   <div
     class="griddle-content"
@@ -468,9 +475,8 @@
 
 <style>
   .griddle-scroll {
+    /* overflow / touch-action / height are set inline, driven by cfg.scroll. */
     position: relative;
-    overflow: auto;
-    touch-action: none;
   }
   .griddle-content {
     position: relative;

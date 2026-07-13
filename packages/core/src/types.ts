@@ -169,6 +169,18 @@ export interface LoopConfig {
   physics?: LoopPhysicsConfig;
 }
 
+/** Interaction gates. All fields default on; omit for standard behavior. */
+export interface InteractiveConfig {
+  /**
+   * Whether dragging on empty grid space draws a new tile ("draw-to-create"),
+   * emitting a drawCreate event on release. Default true. When false, empty-
+   * space pointer-downs are ignored entirely — no draw ghost, no pointer
+   * capture, and no selection clear — so a host page that owns scrolling keeps
+   * its native pan/scroll behavior.
+   */
+  drawToCreate?: boolean;
+}
+
 /** Grid configuration. */
 export interface GridConfig {
   /** Columns. Use Infinity for horizontally infinite canvas. */
@@ -229,6 +241,25 @@ export interface GridConfig {
    * `'a, button, input, textarea, select, [contenteditable], .my-caption'`.
    */
   dragIgnoreFrom?: string;
+  /**
+   * How the grid manages its own scroll container. Default 'container'.
+   *
+   * - 'container' — the grid owns an internal scroll box: `overflow: auto`,
+   *   `touch-action: none` (the grid captures pan/scroll), and height taken
+   *   from the adapter's `height` prop (default 100%). Use when the grid is the
+   *   top-level scroller of a canvas-style app.
+   * - 'none' — the grid does not create its own scroll box: `overflow: visible`,
+   *   no `touch-action` lock, and height sized to its content. The grid grows
+   *   to its natural size and the host page scrolls. Use when an outer element
+   *   owns layout/scroll (e.g. a page that scales the grid via
+   *   `transform: scale()`).
+   */
+  scroll?: 'container' | 'none';
+  /**
+   * Interaction gates (e.g. draw-to-create). See InteractiveConfig. All fields
+   * default on; omit to keep the standard canvas-style behavior.
+   */
+  interactive?: InteractiveConfig;
   /**
    * Loop mode — the finite grid tiles repeat infinitely in both axes.
    * Off by default. See LoopConfig.
