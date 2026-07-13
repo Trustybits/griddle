@@ -1,6 +1,6 @@
 {
   "name": "@griddle/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Headless grid/canvas engine. Zero runtime dependencies.",
   "keywords": [
     "grid",
@@ -37,7 +37,10 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "engines": {
     "node": ">=18"
   },
