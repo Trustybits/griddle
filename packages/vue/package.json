@@ -1,6 +1,6 @@
 {
   "name": "@griddle/vue",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vue 3 bindings for Griddle — a headless, zero-dependency grid/canvas engine.",
   "keywords": [
     "grid",
@@ -36,7 +36,10 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "engines": {
     "node": ">=18"
   },
