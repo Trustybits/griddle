@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.3 - 2026-07-14
+
+### Fixed
+
+- Vue tile drags now begin only after 12 pixels of pointer movement, preserving
+  stationary clicks and native interaction inside editable tile content.
+
+### Compatibility
+
+- `@griddle/react`, `@griddle/vue`, and `@griddle/svelte` 0.1.3 require
+  `@griddle/core` 0.1.3 or newer within the 0.1 release line.
+
 ## 0.1.2 - 2026-07-14
 
 ### Added

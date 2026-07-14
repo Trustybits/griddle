@@ -191,6 +191,7 @@ function setSelection(next: Set<string>) {
 }
 
 const DEFAULT_DRAG_IGNORE = 'a, button, input, textarea, select, [contenteditable]';
+const DRAG_START_THRESHOLD_PX = 12;
 
 const dragController = new DragController(props.api.grid);
 const groupDragController = new GroupDragController(props.api.grid);
@@ -249,18 +250,35 @@ interface DrawState {
 }
 const drawState = ref<DrawState | null>(null);
 
-function onTilePointerDown(e: PointerEvent, tile: Tile) {
-  if (tile.draggable === false) return;
-  if ((e.target as HTMLElement).dataset.griddleHandle) return;
+interface PendingDragState {
+  pointerId: number;
+  tileId: string;
+  tileElement: HTMLDivElement;
+  startPointerX: number;
+  startPointerY: number;
+  mode: 'pin' | 'group' | 'single';
+  groupTileIds: string[];
+}
+let pendingDrag: PendingDragState | null = null;
 
-  const ignoreSelector = config.value.dragIgnoreFrom ?? DEFAULT_DRAG_IGNORE;
-  if (ignoreSelector && (e.target as HTMLElement).closest(ignoreSelector)) return;
+function beginPendingDrag(pending: PendingDragState): boolean {
+  const tile = props.api.grid.getTile(pending.tileId);
+  if (!tile) return false;
 
-  const metaKey = e.metaKey || e.ctrlKey;
+  // Capture only once movement proves this is a drag. Capturing on
+  // pointer-down retargets pointer-up away from editable descendants and turns
+  // ordinary clicks into drag start/end cycles.
+  try {
+    pending.tileElement.setPointerCapture(pending.pointerId);
+  } catch {
+    // The pointer may already have ended or the tile may have unmounted.
+    return false;
+  }
 
-  // Out-of-flow tiles get free-pixel drag (no selection).
-  if (config.value.enablePositioning && isOutOfFlow(tile)) {
-    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+  dragStartPointerX = pending.startPointerX;
+  dragStartPointerY = pending.startPointerY;
+
+  if (pending.mode === 'pin') {
     const layout = computeTileLayout({
       tile,
       config: config.value,
@@ -276,10 +294,61 @@ function onTilePointerDown(e: PointerEvent, tile: Tile) {
     pinDrag.value = {
       tileId: tile.id,
       startPinPx,
-      startPointerX: e.clientX,
-      startPointerY: e.clientY,
+      startPointerX: pending.startPointerX,
+      startPointerY: pending.startPointerY,
     };
     emit('dragStart', tile.id);
+    return true;
+  }
+
+  if (pending.mode === 'group') {
+    if (!groupDragController.start(pending.groupTileIds)) return false;
+    groupDrag.value = {
+      tileIds: pending.groupTileIds,
+      deltaX: 0,
+      deltaY: 0,
+      committedDcol: 0,
+      committedDrow: 0,
+    };
+    emit('dragStart', tile.id);
+    return true;
+  }
+
+  if (!dragController.start(tile.id)) return false;
+  drag.value = {
+    tileId: tile.id,
+    pickupCol: tile.col,
+    pickupRow: tile.row,
+    deltaX: 0,
+    deltaY: 0,
+    indicatorCol: tile.col,
+    indicatorRow: tile.row,
+  };
+  emit('dragStart', tile.id);
+  return true;
+}
+
+function onTilePointerDown(e: PointerEvent, tile: Tile) {
+  if (e.button !== 0) return;
+  if (tile.draggable === false) return;
+  if ((e.target as HTMLElement).dataset.griddleHandle) return;
+
+  const ignoreSelector = config.value.dragIgnoreFrom ?? DEFAULT_DRAG_IGNORE;
+  if (ignoreSelector && (e.target as HTMLElement).closest(ignoreSelector)) return;
+
+  const metaKey = e.metaKey || e.ctrlKey;
+
+  // Out-of-flow tiles get free-pixel drag (no selection).
+  if (config.value.enablePositioning && isOutOfFlow(tile)) {
+    pendingDrag = {
+      pointerId: e.pointerId,
+      tileId: tile.id,
+      tileElement: e.currentTarget as HTMLDivElement,
+      startPointerX: e.clientX,
+      startPointerY: e.clientY,
+      mode: 'pin',
+      groupTileIds: [],
+    };
     e.stopPropagation();
     return;
   }
@@ -304,42 +373,20 @@ function onTilePointerDown(e: PointerEvent, tile: Tile) {
     setSelection(new Set([tile.id]));
   }
 
-  // Capture pointer only when starting a drag.
-  (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-
-  // Group drag if 2+ tiles selected including this one.
+  // Defer capture and drag state until the pointer crosses the movement
+  // threshold. A stationary pointer-down/up remains a normal click, including
+  // when it starts inside contenteditable tile content.
   const effectiveSelection = tileIsSelected ? selection.value : new Set([tile.id]);
-  if (effectiveSelection.size > 1) {
-    const ids = Array.from(effectiveSelection);
-    if (!groupDragController.start(ids)) return;
-    dragStartPointerX = e.clientX;
-    dragStartPointerY = e.clientY;
-    groupDrag.value = {
-      tileIds: ids,
-      deltaX: 0,
-      deltaY: 0,
-      committedDcol: 0,
-      committedDrow: 0,
-    };
-    emit('dragStart', tile.id);
-    e.stopPropagation();
-    return;
-  }
-
-  // Single tile drag.
-  if (!dragController.start(tile.id)) return;
-  dragStartPointerX = e.clientX;
-  dragStartPointerY = e.clientY;
-  drag.value = {
+  const groupTileIds = Array.from(effectiveSelection);
+  pendingDrag = {
+    pointerId: e.pointerId,
     tileId: tile.id,
-    pickupCol: tile.col,
-    pickupRow: tile.row,
-    deltaX: 0,
-    deltaY: 0,
-    indicatorCol: tile.col,
-    indicatorRow: tile.row,
+    tileElement: e.currentTarget as HTMLDivElement,
+    startPointerX: e.clientX,
+    startPointerY: e.clientY,
+    mode: groupTileIds.length > 1 ? 'group' : 'single',
+    groupTileIds,
   };
-  emit('dragStart', tile.id);
   e.stopPropagation();
 }
 
@@ -395,6 +442,20 @@ function onPointerMove(e: PointerEvent) {
     }
     return;
   }
+
+  const pending = pendingDrag;
+  if (pending && e.pointerId === pending.pointerId) {
+    const distance = Math.hypot(
+      e.clientX - pending.startPointerX,
+      e.clientY - pending.startPointerY,
+    );
+    if (distance <= DRAG_START_THRESHOLD_PX) return;
+
+    pendingDrag = null;
+    if (!beginPendingDrag(pending)) return;
+    e.preventDefault();
+  }
+
   const pd = pinDrag.value;
   const gd = groupDrag.value;
   const d = drag.value;
@@ -472,7 +533,11 @@ function syncTiles() {
   props.api.version.value++;
 }
 
-function onPointerUp() {
+function onPointerUp(e: PointerEvent) {
+  if (pendingDrag?.pointerId === e.pointerId) {
+    pendingDrag = null;
+    return;
+  }
   if (drawState.value) {
     const ds = drawState.value;
     const col = Math.min(ds.anchorCol, ds.currentCol);
@@ -554,6 +619,7 @@ onMounted(() => {
   window.addEventListener('keydown', onKeyDown);
 });
 onBeforeUnmount(() => {
+  pendingDrag = null;
   const el = scrollEl.value;
   if (el) el.removeEventListener('scroll', updateViewport);
   ro?.disconnect();
