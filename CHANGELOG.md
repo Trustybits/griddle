@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.4 - 2026-07-14
+
+### Fixed
+
+- Resizing a tile into a contiguous stack now cascade-pushes every downstream
+  tile instead of moving the directly overlapped tile past the rest of the
+  stack.
+
+### Compatibility
+
+- `@griddle/react`, `@griddle/vue`, and `@griddle/svelte` 0.1.4 require
+  `@griddle/core` 0.1.4 or newer within the 0.1 release line.
+
 ## 0.1.3 - 2026-07-14
 
 ### Fixed

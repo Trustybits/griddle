@@ -41,6 +41,32 @@ export interface MoveOptions {
 }
 
 /**
+ * Push tiles out of a resized tile's footprint, cascading through any occupied
+ * cells instead of skipping over them. Resize grows in place, so the first
+ * displacement direction points from the resized footprint toward the first
+ * victim (away from the resized tile). Remaining directions retain the normal
+ * priority order as fallbacks for bounded grids.
+ */
+export function displaceResizeOverlaps(
+  grid: Grid,
+  resizedId: string,
+  resizedRect: CellRect,
+): boolean {
+  const overlap = grid.tilesIn(resizedRect, new Set([resizedId]));
+  if (overlap.length === 0) return true;
+
+  const snapshot = grid.snapshotTiles();
+  const dirs = priorityDirections(tileRect(overlap[0]!), resizedRect);
+
+  for (const dir of dirs) {
+    if (cascadePushOverlap(grid, resizedId, resizedRect, dir)) return true;
+    grid.restoreTiles(snapshot);
+  }
+
+  return false;
+}
+
+/**
  * Attempt to move `tileId` to `target`. On success, the grid is mutated in
  * place and `true` is returned. On failure, the grid is left unchanged and
  * `false` is returned.

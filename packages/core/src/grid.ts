@@ -17,7 +17,10 @@ import {
   rectsOverlap,
   tileRect,
 } from './geometry.js';
-import { moveTile as moveEngine } from './movement.js';
+import {
+  displaceResizeOverlaps,
+  moveTile as moveEngine,
+} from './movement.js';
 import { compact as compactEngine } from './compaction.js';
 import { isInFlow } from './positioning.js';
 import { assertLoopable, loopEnabled } from './loop.js';
@@ -420,45 +423,51 @@ export class Grid {
     tile.w = clamped.w;
     tile.h = clamped.h;
 
-    const overlapping = this.tilesIn(newRect, new Set([id]));
-    for (const victim of overlapping) {
-      const priorityDirs = priorityDirections(newRect, tileRect(victim));
-      const steps = priorityDirs.map(directionStep);
-      let placed = false;
+    if (!displaceResizeOverlaps(this, id, newRect)) {
+      // Preserve the pre-cascade fallback for bounded or irregular layouts:
+      // place each direct victim in the first legal slot, then fall back to a
+      // nearest-free-cell search. The cascade path handles ordinary stacks;
+      // this path retains the broader legacy placement behavior when an
+      // entire collision chain cannot move together.
+      const overlapping = this.tilesIn(newRect, new Set([id]));
+      for (const victim of overlapping) {
+        const priorityDirs = priorityDirections(newRect, tileRect(victim));
+        const steps = priorityDirs.map(directionStep);
+        let placed = false;
 
-      // Walk each priority direction outward; the first legal placement wins.
-      for (const step of steps) {
-        if (step.dx === 0 && step.dy === 0) continue;
-        let cursor: CellPos = { col: victim.col, row: victim.row };
-        for (let k = 0; k < 128 && !placed; k++) {
-          cursor = { col: cursor.col + step.dx, row: cursor.row + step.dy };
-          const rect: CellRect = {
-            col: cursor.col,
-            row: cursor.row,
-            w: victim.w,
-            h: victim.h,
-          };
-          if (!this.rectInBounds(rect)) break;
-          const blocked = this.tilesIn(rect, new Set([victim.id, id]));
-          if (blocked.length === 0 && !rectsOverlap(rect, newRect)) {
-            this._setTilePos(victim.id, cursor);
+        for (const step of steps) {
+          if (step.dx === 0 && step.dy === 0) continue;
+          let cursor: CellPos = { col: victim.col, row: victim.row };
+          for (let k = 0; k < 128 && !placed; k++) {
+            cursor = { col: cursor.col + step.dx, row: cursor.row + step.dy };
+            const rect: CellRect = {
+              col: cursor.col,
+              row: cursor.row,
+              w: victim.w,
+              h: victim.h,
+            };
+            if (!this.rectInBounds(rect)) break;
+            const blocked = this.tilesIn(rect, new Set([victim.id, id]));
+            if (blocked.length === 0 && !rectsOverlap(rect, newRect)) {
+              this._setTilePos(victim.id, cursor);
+              placed = true;
+            }
+          }
+          if (placed) break;
+        }
+
+        if (!placed) {
+          const fallback = findNearestFreeCell(this, victim, newRect, id);
+          if (fallback) {
+            this._setTilePos(victim.id, fallback);
             placed = true;
           }
         }
-        if (placed) break;
-      }
 
-      if (!placed) {
-        const fallback = findNearestFreeCell(this, victim, newRect, id);
-        if (fallback) {
-          this._setTilePos(victim.id, fallback);
-          placed = true;
+        if (!placed) {
+          this.restoreTiles(snapshot);
+          return false;
         }
-      }
-
-      if (!placed) {
-        this.restoreTiles(snapshot);
-        return false;
       }
     }
 

@@ -449,6 +449,29 @@ test('resizeTile grows and displaces neighbors', () => {
   assert(!(b.col === 1 && b.row === 0));
 });
 
+test('resizeTile cascades a vertical stack instead of jumping the first victim', () => {
+  const g = new Grid({
+    cols: 4,
+    rows: Infinity,
+    unitWidth: 50,
+    unitHeight: 50,
+    gravity: 'top',
+  });
+  g.addTile({ id: 'top', col: 0, row: 0, w: 1, h: 1 });
+  g.addTile({ id: 'second', col: 0, row: 1, w: 1, h: 1 });
+  g.addTile({ id: 'third', col: 0, row: 2, w: 1, h: 1 });
+  g.addTile({ id: 'fourth', col: 0, row: 3, w: 1, h: 1 });
+
+  const ok = g.resizeTile('top', { w: 1, h: 2 });
+
+  assert(ok, 'resize should succeed');
+  eq(g.getTile('top').row, 0);
+  eq(g.getTile('top').h, 2);
+  eq(g.getTile('second').row, 2, 'direct victim should move down one row');
+  eq(g.getTile('third').row, 3, 'next tile should cascade down one row');
+  eq(g.getTile('fourth').row, 4, 'entire lower stack should cascade down');
+});
+
 // ---- Loop mode ---------------------------------------------------------
 
 test('Loop: wrapValue positive modulo', () => {
