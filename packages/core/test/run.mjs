@@ -14,6 +14,8 @@ import {
   loopInstances,
   resolveLoop,
   PanController,
+  DEFAULT_ANIMATION_CONFIG,
+  resolveAnimationConfig,
 } from '../dist/index.js';
 
 let passed = 0;
@@ -82,6 +84,40 @@ test('footprintEquals', () => {
 });
 
 // ---- Grid basic API ----------------------------------------------------
+
+test('animation config: smooth defaults are normalized onto the grid', () => {
+  const g = new Grid({ cols: 10, rows: 10, unitWidth: 50, unitHeight: 50 });
+  deepEq(g.config.animation, DEFAULT_ANIMATION_CONFIG);
+});
+
+test('animation config: partial updates preserve existing custom settings', () => {
+  const g = new Grid({
+    cols: 10,
+    rows: 10,
+    unitWidth: 50,
+    unitHeight: 50,
+    animation: {
+      repositionDurationMs: 500,
+      repositionEasing: 'linear',
+      liftDurationMs: 200,
+    },
+  });
+  g.updateConfig({ animation: { liftDurationMs: 90 } });
+  eq(g.config.animation.repositionDurationMs, 500);
+  eq(g.config.animation.repositionEasing, 'linear');
+  eq(g.config.animation.liftDurationMs, 90);
+});
+
+test('animation config: invalid values fall back and negative durations clamp to zero', () => {
+  const animation = resolveAnimationConfig({
+    repositionDurationMs: Number.NaN,
+    repositionEasing: '   ',
+    liftDurationMs: -20,
+  });
+  eq(animation.repositionDurationMs, DEFAULT_ANIMATION_CONFIG.repositionDurationMs);
+  eq(animation.repositionEasing, DEFAULT_ANIMATION_CONFIG.repositionEasing);
+  eq(animation.liftDurationMs, 0);
+});
 
 test('add/remove/query', () => {
   const g = new Grid({ cols: 10, rows: 10, unitWidth: 50, unitHeight: 50 });
@@ -252,6 +288,25 @@ test('Rule 6: infinite axis push cascades tiles', () => {
   assert(ok2);
   eq(g2.getTile('drag').col, 0);
   eq(g2.getTile('drag').row, 0);
+});
+
+test('Rule 6: infinite Y never pushes a collision victim above row zero', () => {
+  // A 1x1 dragger moves south into the top of a full-width 2x4 victim. A
+  // blocker below prevents the normal south displacement, so the Rule 6 fast
+  // path considers pushing north. Infinite Y grows downward only; older code
+  // treated north as unbounded and moved `big` to row -3, clipping its top.
+  const g = new Grid({ cols: 2, rows: Infinity, unitWidth: 50, unitHeight: 50 });
+  g.addTile({ id: 'drag', col: 0, row: 0, w: 1, h: 1 });
+  g.addTile({ id: 'big', col: 0, row: 1, w: 2, h: 4 });
+  g.addTile({ id: 'block', col: 0, row: 5, w: 2, h: 1 });
+
+  const ok = g.moveTile('drag', { col: 0, row: 1 });
+
+  assert(ok, 'move should fall back to an in-bounds displacement');
+  eq(g.getTile('drag').row, 1);
+  for (const tile of g.tiles) {
+    assert(tile.row >= 0, `${tile.id} must remain at a non-negative row, got ${tile.row}`);
+  }
 });
 
 test('Rule 6: 0-1 BFS on fully fixed grid handles diagonal swap', () => {

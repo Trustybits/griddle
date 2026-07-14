@@ -14,6 +14,7 @@
   import type { TileLayout } from '@griddle/core';
   import type { GriddleApi } from './griddleStore.js';
   import LoopGrid from './LoopGrid.svelte';
+  import { animateReposition, liftTransition } from './animation.js';
 
   export let api: GriddleApi;
   export let height: number | string = '100%';
@@ -311,12 +312,7 @@
         const dx = p.x - x;
         const dy = p.y - y;
         if (dx !== 0 || dy !== 0) {
-          node.style.transition = 'none';
-          node.style.transform = `translate(${dx}px, ${dy}px)`;
-          requestAnimationFrame(() => {
-            node.style.transition = 'transform 220ms cubic-bezier(.2,.7,.2,1)';
-            node.style.transform = 'translate(0,0)';
-          });
+          animateReposition(node, dx, dy, cfg.animation);
         }
       }
       prevRects.set(t.id, { x, y });
@@ -455,6 +451,7 @@
         style:width={layout.width + 'px'}
         style:height={layout.height + 'px'}
         style:transform={layout.transform ?? ''}
+        style:transition={isDragging(tile.id) ? liftTransition(cfg.animation) : ''}
         style:z-index={layout.zIndex}
       >
         <slot name="tile" {tile} />
@@ -494,7 +491,7 @@
     box-sizing: border-box;
     cursor: grab;
     user-select: none;
-    will-change: transform;
+    will-change: transform, translate;
     z-index: 1;
   }
   .griddle-tile.griddle-resizing {
@@ -510,7 +507,6 @@
        is set inline (cursor delta), so the scale is folded into a CSS filter
        to avoid clobbering it. */
     filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.18));
-    transition: filter 120ms ease-out, opacity 120ms ease-out;
   }
   .griddle-drop-indicator {
     position: absolute;

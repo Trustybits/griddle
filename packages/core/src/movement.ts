@@ -193,6 +193,10 @@ function tryDisplaceVictim(
 
 function isInfiniteDirection(grid: Grid, dir: Direction8): boolean {
   const { dx, dy } = directionStep(dir);
+  // Infinite axes grow toward positive coordinates only. The grid origin is a
+  // hard lower bound, so west/north (and diagonals containing either) must use
+  // the bounded cascade/BFS paths instead of the unbounded fast path.
+  if (dx < 0 || dy < 0) return false;
   if (dx !== 0 && !grid.config.infiniteX) return false;
   if (dy !== 0 && !grid.config.infiniteY) return false;
   if (dx !== 0 && grid.config.infiniteX) return true;
@@ -352,6 +356,10 @@ function pushChainInfinite(
         w: cur.w,
         h: cur.h,
       };
+      // Keep the same invariant as every other movement path. This is also a
+      // defensive guard if a future caller reaches the fast path with a
+      // direction that approaches the grid's non-negative origin.
+      if (!grid.rectInBounds(newRect)) return false;
       grid._setTilePos(victim.id, { col: newRect.col, row: newRect.row });
       const collides = grid.tilesIn(newRect, new Set([victim.id, tileId]));
       for (const c of collides) {

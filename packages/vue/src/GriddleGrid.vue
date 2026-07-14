@@ -111,6 +111,7 @@ import {
 } from '@griddle/core';
 import type { TileLayout } from '@griddle/core';
 import type { GriddleApi } from './useGriddle.js';
+import { animateReposition, liftTransition } from './animation.js';
 
 const props = defineProps<{
   api: GriddleApi;
@@ -586,12 +587,7 @@ watch(() => props.api.version.value, async () => {
       const dx = p.x - x;
       const dy = p.y - y;
       if (dx !== 0 || dy !== 0) {
-        node.style.transition = 'none';
-        node.style.transform = `translate(${dx}px, ${dy}px)`;
-        requestAnimationFrame(() => {
-          node.style.transition = 'transform 220ms cubic-bezier(.2,.7,.2,1)';
-          node.style.transform = 'translate(0,0)';
-        });
+        animateReposition(node, dx, dy, config.value.animation);
       }
     }
     prevRects.set(t.id, { x, y });
@@ -683,10 +679,10 @@ function tileStyle(tile: Tile) {
     userSelect: 'none' as const,
     zIndex: layout.zIndex,
     opacity: lifted || isResizing ? 0.85 : 1,
-    willChange: 'transform',
+    willChange: 'transform, translate',
     transform: layout.transform ?? '',
     filter: lifted ? 'drop-shadow(0 8px 16px rgba(0,0,0,0.18))' : '',
-    transition: lifted ? 'filter 120ms ease-out, opacity 120ms ease-out' : '',
+    transition: lifted ? liftTransition(config.value.animation) : '',
     boxShadow: isSelected
       ? '0 0 0 3px rgba(59, 91, 219, 0.85), inset 0 0 0 1px rgba(59, 91, 219, 0.3)'
       : '',

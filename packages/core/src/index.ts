@@ -10,6 +10,7 @@ export type {
   Footprint,
   Gravity,
   GridChangeEvent,
+  GridAnimationConfig,
   GridConfig,
   GridSnapshot,
   LoopConfig,
@@ -19,6 +20,11 @@ export type {
   Tile,
   TilePosition,
 } from './types.js';
+export {
+  DEFAULT_ANIMATION_CONFIG,
+  resolveAnimationConfig,
+  type ResolvedGridAnimationConfig,
+} from './animation.js';
 export {
   rectsOverlap,
   rectsAdjacent,

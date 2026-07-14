@@ -81,3 +81,30 @@ const json = grid.toJSON();
 ```
 
 See `docs/movement.md` for the full movement ruleset.
+
+## Animation configuration
+
+The React, Vue, and Svelte adapters share the same animation settings through
+`GridConfig.animation`. Repositioning defaults to a smooth 320 ms ease-out and
+rapid repacks continue from each tile's current visual position.
+
+```ts
+const grid = new Grid({
+  cols: 12,
+  rows: 12,
+  unitWidth: 75,
+  unitHeight: 75,
+  animation: {
+    enabled: true,
+    repositionDurationMs: 320,
+    repositionEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    liftDurationMs: 160,
+    liftEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    respectReducedMotion: true,
+  },
+});
+```
+
+Set `enabled: false` to disable adapter animations, or set either duration to
+`0` to disable only that transition. Reduced-motion preferences are honored by
+default and can be opted out of with `respectReducedMotion: false`.

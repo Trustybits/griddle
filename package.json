@@ -11,7 +11,9 @@
     "build:core": "cd packages/core && npm run build",
     "build:adapters": "npm run build --workspace @griddle/react --workspace @griddle/vue --workspace @griddle/svelte",
     "build": "npm run build:core && npm run build:adapters",
-    "test": "node packages/core/test/run.mjs",
+    "test:core": "node packages/core/test/run.mjs",
+    "test:adapters": "npm run test --workspace @griddle/react --workspace @griddle/vue --workspace @griddle/svelte",
+    "test": "npm run test:core && npm run test:adapters",
     "demo:react": "cd demos/react && npm run dev",
     "demo:vue": "cd demos/vue && npm run dev",
     "demo:svelte": "cd demos/svelte && npm run dev"

@@ -181,6 +181,22 @@ export interface InteractiveConfig {
   drawToCreate?: boolean;
 }
 
+/** Adapter animation settings. All durations are in milliseconds. */
+export interface GridAnimationConfig {
+  /** Master switch for adapter-provided tile animations. Default true. */
+  enabled?: boolean;
+  /** Duration used when tiles reposition after a move or repack. Default 320. */
+  repositionDurationMs?: number;
+  /** CSS easing used when tiles reposition. */
+  repositionEasing?: string;
+  /** Duration of the opacity/shadow transition when a tile is lifted. Default 160. */
+  liftDurationMs?: number;
+  /** CSS easing used when a tile is lifted. */
+  liftEasing?: string;
+  /** Honor `prefers-reduced-motion: reduce`. Default true. */
+  respectReducedMotion?: boolean;
+}
+
 /** Grid configuration. */
 export interface GridConfig {
   /** Columns. Use Infinity for horizontally infinite canvas. */
@@ -260,6 +276,11 @@ export interface GridConfig {
    * default on; omit to keep the standard canvas-style behavior.
    */
   interactive?: InteractiveConfig;
+  /**
+   * Animation settings consumed by the framework adapters. The headless
+   * engine stores and normalizes these values but does not access the DOM.
+   */
+  animation?: GridAnimationConfig;
   /**
    * Loop mode — the finite grid tiles repeat infinitely in both axes.
    * Off by default. See LoopConfig.

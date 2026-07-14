@@ -28,6 +28,31 @@ const json = grid.toJSON(); // serialize
 grid.loadJSON(json);        // restore
 ```
 
+## Adapter animation configuration
+
+Core stores and normalizes the animation settings shared by the React, Vue,
+and Svelte adapters. It remains headless and never accesses the DOM itself.
+
+```ts
+const grid = new Grid({
+  cols: 12,
+  rows: 12,
+  unitWidth: 75,
+  unitHeight: 75,
+  animation: {
+    enabled: true,
+    repositionDurationMs: 320,
+    repositionEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    liftDurationMs: 160,
+    liftEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    respectReducedMotion: true,
+  },
+});
+```
+
+Set `enabled: false` to disable all adapter animations, or set an individual
+duration to `0` to disable only that transition.
+
 ## Concepts
 
 - **Unit** — a fixed `unitWidth × unitHeight` cell.

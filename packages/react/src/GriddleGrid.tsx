@@ -35,6 +35,7 @@ import {
 } from '@griddle/core';
 import type { TileLayout } from '@griddle/core';
 import { useGridVersion } from './useGriddle.js';
+import { animateReposition, liftTransition } from './animation.js';
 
 export interface GriddleGridProps {
   api: GriddleApi;
@@ -246,17 +247,21 @@ function GriddleStaticGrid(props: GriddleGridProps) {
         const dx = p.x - x;
         const dy = p.y - y;
         if (dx !== 0 || dy !== 0) {
-          node.style.transition = 'none';
-          node.style.transform = `translate(${dx}px, ${dy}px)`;
-          requestAnimationFrame(() => {
-            node.style.transition = 'transform 220ms cubic-bezier(.2,.7,.2,1)';
-            node.style.transform = 'translate(0,0)';
-          });
+          animateReposition(node, dx, dy, config.animation);
         }
       }
     }
     prevRectsRef.current = next;
-  }, [tiles, version, colSize, rowSize, config.unitWidth, config.unitHeight, config.gap]);
+  }, [
+    tiles,
+    version,
+    colSize,
+    rowSize,
+    config.unitWidth,
+    config.unitHeight,
+    config.gap,
+    config.animation,
+  ]);
 
   // --- drag handlers ---
   const onTilePointerDown = useCallback(
@@ -774,10 +779,10 @@ function GriddleStaticGrid(props: GriddleGridProps) {
             userSelect: 'none',
             zIndex,
             opacity: lifted || isResizing ? 0.85 : 1,
-            willChange: 'transform',
+            willChange: 'transform, translate',
             transform,
             filter: lifted ? 'drop-shadow(0 8px 16px rgba(0,0,0,0.18))' : undefined,
-            transition: lifted ? 'filter 120ms ease-out, opacity 120ms ease-out' : undefined,
+            transition: lifted ? liftTransition(config.animation) : undefined,
             boxShadow: isSelected
               ? '0 0 0 3px rgba(59, 91, 219, 0.85), inset 0 0 0 1px rgba(59, 91, 219, 0.3)'
               : undefined,

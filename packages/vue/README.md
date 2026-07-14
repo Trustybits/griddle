@@ -39,6 +39,31 @@ const api = useGriddle({
 </template>
 ```
 
+## Animation configuration
+
+Tile repositioning and lift animations share `config.animation` with the other
+Griddle adapters. Repositioning defaults to a smooth 320 ms ease-out and rapid
+repacks continue from each tile's current visual position.
+
+```ts
+const api = useGriddle({
+  config: {
+    cols: 12, rows: 12, unitWidth: 75, unitHeight: 75,
+    animation: {
+      repositionDurationMs: 320,
+      repositionEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      liftDurationMs: 160,
+      liftEasing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      respectReducedMotion: true,
+    },
+  },
+  tiles,
+});
+```
+
+Use `animation.enabled: false` to disable all adapter animations. A duration of
+`0` disables only that transition.
+
 ## Loop mode (infinite gallery)
 
 Enable `loop` in the config and the content repeats endlessly with drag-to-pan

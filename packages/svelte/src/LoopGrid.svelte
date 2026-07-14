@@ -14,6 +14,7 @@
   } from '@griddle/core';
   import type { LoopTileInstance } from '@griddle/core';
   import type { GriddleApi } from './griddleStore.js';
+  import { animateReposition } from './animation.js';
 
   export let api: GriddleApi;
   export let height: number | string = '100%';
@@ -388,12 +389,7 @@
             Math.abs(dx) < period.width / 2 &&
             Math.abs(dy) < period.height / 2
           ) {
-            node.style.transition = 'none';
-            node.style.transform = `translate(${dx}px, ${dy}px)`;
-            requestAnimationFrame(() => {
-              node.style.transition = 'transform 220ms cubic-bezier(.2,.7,.2,1)';
-              node.style.transform = 'translate(0,0)';
-            });
+            animateReposition(node, dx, dy, cfg.animation);
           }
         }
       }
@@ -531,6 +527,7 @@
     position: absolute;
     box-sizing: border-box;
     user-select: none;
+    will-change: translate;
     z-index: 1;
     border-radius: var(--griddle-tile-radius, 4px);
   }

@@ -22,6 +22,7 @@ import { compact as compactEngine } from './compaction.js';
 import { isInFlow } from './positioning.js';
 import { assertLoopable, loopEnabled } from './loop.js';
 import { computePack } from './packing.js';
+import { resolveAnimationConfig } from './animation.js';
 
 function defaultConfig(c: GridConfig): GridConfig {
   return {
@@ -33,6 +34,7 @@ function defaultConfig(c: GridConfig): GridConfig {
     snapDuringDrag: c.snapDuringDrag ?? true,
     maxRepackHops: c.maxRepackHops ?? 64,
     ...c,
+    animation: resolveAnimationConfig(c.animation),
   };
 }
 
@@ -83,7 +85,13 @@ export class Grid {
 
   updateConfig(patch: Partial<GridConfig>): void {
     const wasLooping = loopEnabled(this.config);
-    const next = defaultConfig({ ...this.config, ...patch });
+    const next = defaultConfig({
+      ...this.config,
+      ...patch,
+      animation: patch.animation
+        ? { ...this.config.animation, ...patch.animation }
+        : this.config.animation,
+    });
     assertLoopable(next);
     this.config = next;
     this.changes.emit({ type: 'config', tileIds: [] });

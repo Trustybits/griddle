@@ -79,6 +79,7 @@ import {
 } from '@griddle/core';
 import type { LoopTileInstance } from '@griddle/core';
 import type { GriddleApi } from './useGriddle.js';
+import { animateReposition } from './animation.js';
 
 const props = defineProps<{
   api: GriddleApi;
@@ -480,12 +481,7 @@ watch(() => props.api.version.value, async () => {
           Math.abs(dx) < period.value.width / 2 &&
           Math.abs(dy) < period.value.height / 2
         ) {
-          node.style.transition = 'none';
-          node.style.transform = `translate(${dx}px, ${dy}px)`;
-          requestAnimationFrame(() => {
-            node.style.transition = 'transform 220ms cubic-bezier(.2,.7,.2,1)';
-            node.style.transform = 'translate(0,0)';
-          });
+          animateReposition(node, dx, dy, config.value.animation);
         }
       }
     }
@@ -512,6 +508,7 @@ const viewportStyle = computed(() => {
     height: typeof props.height === 'number' ? props.height + 'px' : (props.height ?? '100%'),
     touchAction: 'none' as const,
     userSelect: 'none' as const,
+    willChange: 'translate',
     cursor: !editable.value && loop.value?.dragPan ? 'grab' : undefined,
     ['--griddle-tile-radius' as string]: (config.value.tileRadius ?? 4) + 'px',
     ...bg,

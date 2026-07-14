@@ -36,6 +36,7 @@ import {
 } from '@griddle/core';
 import type { GriddleGridProps } from './GriddleGrid.js';
 import { useGridVersion } from './useGriddle.js';
+import { animateReposition } from './animation.js';
 
 const DEFAULT_DRAG_IGNORE = 'a, button, input, textarea, select, [contenteditable]';
 const PAN_THRESHOLD_PX = 4;
@@ -504,17 +505,12 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
           Math.abs(dx) < periodRef.current.width / 2 &&
           Math.abs(dy) < periodRef.current.height / 2
         ) {
-          node.style.transition = 'none';
-          node.style.transform = `translate(${dx}px, ${dy}px)`;
-          requestAnimationFrame(() => {
-            node.style.transition = 'transform 220ms cubic-bezier(.2,.7,.2,1)';
-            node.style.transform = 'translate(0,0)';
-          });
+          animateReposition(node, dx, dy, config.animation);
         }
       }
     }
     prevRectsRef.current = next;
-  }, [instances, editable]);
+  }, [instances, editable, config.animation]);
 
   // Drop indicator: rendered in the base copy (ghost edit is plain-grid).
   let indicatorRect: { left: number; top: number; width: number; height: number } | null = null;
@@ -624,6 +620,7 @@ export function GriddleLoopGrid(props: GriddleGridProps) {
             boxSizing: 'border-box',
             cursor: editable && isBase ? 'grab' : undefined,
             userSelect: 'none',
+            willChange: 'translate',
             // Ghosts are display-only: pointer-transparent (so the gesture
             // falls through to drag-pan) and dimmed to mark the editable copy.
             pointerEvents: isGhost ? 'none' : undefined,
