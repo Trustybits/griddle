@@ -2,7 +2,7 @@
 
 import { writable, type Readable } from 'svelte/store';
 import { Grid } from '@griddle/core';
-import type { GridConfig, Tile, GridSnapshot } from '@griddle/core';
+import type { GridConfig, GridSnapshot, ReflowOptions, Tile } from '@griddle/core';
 
 export interface UseGriddleInit {
   config: GridConfig;
@@ -18,6 +18,7 @@ export interface GriddleApi {
   resizeTile: (id: string, size: { w: number; h: number }) => boolean;
   addTile: (t: Tile) => void;
   removeTile: (id: string) => void;
+  reflow: (options: ReflowOptions) => boolean;
   updateConfig: (patch: Partial<GridConfig>) => void;
   toJSON: () => GridSnapshot;
   loadJSON: (snap: GridSnapshot) => void;
@@ -45,6 +46,7 @@ export function createGriddle(init: UseGriddleInit): GriddleApi {
     resizeTile: (id, size) => grid.resizeTile(id, size),
     addTile: (t) => grid.addTile(t),
     removeTile: (id) => grid.removeTile(id),
+    reflow: (options) => grid.reflow(options),
     updateConfig: (patch) => grid.updateConfig(patch),
     toJSON: () => grid.toJSON(),
     loadJSON: (snap) => grid.loadJSON(snap),

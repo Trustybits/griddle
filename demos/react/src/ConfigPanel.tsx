@@ -80,12 +80,19 @@ export function ConfigPanel(props: {
 
       <div style={heading}>Grid</div>
       <div style={row}>
-        <span style={label}>Columns</span>
+        <span style={label}>Columns (reflow)</span>
         <input style={input} type="number" min={1} value={cfg.cols === Infinity ? '' : cfg.cols}
           placeholder={cfg.cols === Infinity ? '∞' : ''}
           onChange={(e) => {
-            const v = e.target.value === '' ? Infinity : Math.max(1, parseInt(e.target.value, 10));
-            api.updateConfig({ cols: v, infiniteX: v === Infinity });
+            if (e.target.value === '') {
+              api.updateConfig({ cols: Infinity, infiniteX: true });
+              return;
+            }
+            const parsed = parseInt(e.target.value, 10);
+            api.reflow({
+              cols: Number.isFinite(parsed) ? Math.max(1, parsed) : 1,
+              strategy: 'preserve-v1',
+            });
           }} />
       </div>
       <div style={row}>

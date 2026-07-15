@@ -1,8 +1,8 @@
 // Vue composable that wraps a Grid instance with reactive state.
 
-import { onBeforeUnmount, reactive, ref, shallowRef } from 'vue';
+import { onScopeDispose, ref, shallowRef } from 'vue';
 import { Grid } from '@griddle/core';
-import type { GridConfig, Tile, GridSnapshot } from '@griddle/core';
+import type { GridConfig, GridSnapshot, ReflowOptions, Tile } from '@griddle/core';
 
 export interface UseGriddleInit {
   config: GridConfig;
@@ -22,7 +22,7 @@ export function useGriddle(init: UseGriddleInit) {
     config.value = grid.config;
     version.value++;
   });
-  onBeforeUnmount(off);
+  onScopeDispose(off);
 
   const api = {
     grid,
@@ -33,6 +33,7 @@ export function useGriddle(init: UseGriddleInit) {
     resizeTile: (id: string, size: { w: number; h: number }) => grid.resizeTile(id, size),
     addTile: (t: Tile) => grid.addTile(t),
     removeTile: (id: string) => grid.removeTile(id),
+    reflow: (options: ReflowOptions) => grid.reflow(options),
     updateConfig: (patch: Partial<GridConfig>) => grid.updateConfig(patch),
     toJSON: () => grid.toJSON(),
     loadJSON: (snap: GridSnapshot) => grid.loadJSON(snap),
