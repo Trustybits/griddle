@@ -1,6 +1,8 @@
 // @griddle/core public API.
 
 export { Grid } from './grid.js';
+export { reflowTiles } from './reflow.js';
+export type { ReflowOptions, ReflowStrategy } from './reflow.js';
 export type {
   CellPos,
   CellRect,

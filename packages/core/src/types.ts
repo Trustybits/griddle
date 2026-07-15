@@ -299,6 +299,7 @@ export interface GridChangeEvent {
     | 'remove'
     | 'move'
     | 'resize'
+    | 'reflow'
     | 'repack'
     | 'compact'
     | 'load';
