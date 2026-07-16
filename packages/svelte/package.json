@@ -1,6 +1,6 @@
 {
   "name": "@griddle/svelte",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Svelte bindings for Griddle — a headless, zero-dependency grid/canvas engine.",
   "keywords": [
     "grid",
@@ -53,11 +53,11 @@
     "prepublishOnly": "npm run build && npm test"
   },
   "peerDependencies": {
-    "@griddle/core": "^0.1.5",
+    "@griddle/core": "^0.1.6",
     "svelte": "^4.0.0 || ^5.0.0"
   },
   "devDependencies": {
-    "@griddle/core": "^0.1.5",
+    "@griddle/core": "^0.1.6",
     "@sveltejs/package": "^2.5.8",
     "svelte": "^4.2.0",
     "svelte-check": "^4.7.2",

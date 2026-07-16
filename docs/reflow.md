@@ -32,8 +32,9 @@ api.reflow({ cols: 4, strategy: 'preserve-v1' });
   valid positions and gaps, resolves collisions and horizontal overflow, and
   proportionally scales tiles that are wider than the target.
 - `placements` is a generic map of pre-positioned geometry. It does not imply
-  breakpoints or persistence. Matching placements remain authoritative; tiles
-  without one are placed around them.
+  breakpoints or persistence. Matching placements remain authoritative only
+  when they are in bounds and mutually non-overlapping; illegal placement maps
+  throw before the grid is mutated. Tiles without one are placed around them.
 - The pure helper returns new tile objects and preserves consumer data and tile
   capabilities. `Grid.reflow()` operates only on in-flow tiles and leaves
   absolute and fixed tiles untouched.

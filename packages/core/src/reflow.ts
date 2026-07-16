@@ -16,7 +16,7 @@ export interface ReflowOptions {
   cols: number;
   /** Immutable algorithm identifier. */
   strategy: ReflowStrategy;
-  /** Optional caller-supplied geometry that remains authoritative. */
+  /** Optional caller-supplied geometry; authoritative when legal. */
   placements?: Readonly<Record<string, CellRect>>;
 }
 
@@ -30,6 +30,9 @@ function assertOptions(options: ReflowOptions): void {
 }
 
 function scaleTileToFit(tile: Tile, cols: number): Tile {
+  if (!Number.isInteger(tile.w) || tile.w <= 0 || !Number.isInteger(tile.h) || tile.h <= 0) {
+    throw new RangeError(`Griddle: tile "${tile.id}" footprint must use positive integer cells`);
+  }
   if (tile.w <= cols) return { ...tile };
   const scale = cols / tile.w;
   return {
@@ -37,6 +40,32 @@ function scaleTileToFit(tile: Tile, cols: number): Tile {
     w: cols,
     h: Math.max(1, Math.round(tile.h * scale)),
   };
+}
+
+function assertFiniteLayout(tiles: readonly Tile[], cols: number): void {
+  const placed: Tile[] = [];
+  for (const tile of tiles) {
+    if (
+      !Number.isInteger(tile.col) ||
+      !Number.isInteger(tile.row) ||
+      !Number.isInteger(tile.w) ||
+      !Number.isInteger(tile.h) ||
+      tile.col < 0 ||
+      tile.row < 0 ||
+      tile.w <= 0 ||
+      tile.h <= 0 ||
+      tile.col + tile.w > cols
+    ) {
+      throw new RangeError(`Griddle: reflow placement for tile "${tile.id}" is outside the grid bounds`);
+    }
+    const collision = placed.find((other) => rectsOverlap(tileRect(other), tileRect(tile)));
+    if (collision) {
+      throw new RangeError(
+        `Griddle: reflow placements for tiles "${collision.id}" and "${tile.id}" overlap`,
+      );
+    }
+    placed.push(tile);
+  }
 }
 
 function findFirstAvailableSpot(
@@ -74,7 +103,12 @@ function reflowWithoutPlacements(tiles: readonly Tile[], cols: number): Tile[] {
 
   for (const tile of ordered) {
     const scaled = scaleTileToFit(tile, cols);
-    const withinBounds = scaled.col >= 0 && scaled.col + scaled.w <= cols;
+    const withinBounds =
+      Number.isInteger(scaled.col) &&
+      Number.isInteger(scaled.row) &&
+      scaled.col >= 0 &&
+      scaled.row >= 0 &&
+      scaled.col + scaled.w <= cols;
     const canKeepPosition =
       withinBounds &&
       !placed.some((other) => rectsOverlap(tileRect(other), tileRect(scaled)));
@@ -95,7 +129,9 @@ function reflowWithoutPlacements(tiles: readonly Tile[], cols: number): Tile[] {
   }
 
   const placedById = new Map(placed.map((tile) => [tile.id, tile]));
-  return tiles.map((tile) => placedById.get(tile.id) ?? { ...tile });
+  const result = tiles.map((tile) => placedById.get(tile.id) ?? { ...tile });
+  assertFiniteLayout(result, cols);
+  return result;
 }
 
 function reflowWithPlacements(
@@ -109,11 +145,16 @@ function reflowWithPlacements(
   for (const tile of tiles) {
     const placement = placements[tile.id];
     if (placement) {
-      positioned.push({ ...tile, ...placement });
+      positioned.push(scaleTileToFit({ ...tile, ...placement }, cols));
     } else {
       missing.push(scaleTileToFit(tile, cols));
     }
   }
+
+  // Explicit placements are authoritative, but they are not allowed to break
+  // the core layout invariant. Reject them before placing missing tiles so an
+  // invalid width cannot make the open-slot scan run forever.
+  assertFiniteLayout(positioned, cols);
 
   const projected = [...positioned];
   for (const tile of missing) {
@@ -125,6 +166,7 @@ function reflowWithPlacements(
     );
     projected.push({ ...tile, ...position });
   }
+  assertFiniteLayout(projected, cols);
   return projected;
 }
 

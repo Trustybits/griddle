@@ -43,6 +43,52 @@ function defaultConfig(c: GridConfig): GridConfig {
   };
 }
 
+function assertPositiveInteger(value: number, label: string): void {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new RangeError(`Griddle: ${label} must be a positive integer`);
+  }
+}
+
+function rectInConfigBounds(config: GridConfig, rect: CellRect): boolean {
+  if (!config.infiniteX && (rect.col < 0 || rect.col + rect.w > config.cols)) {
+    return false;
+  }
+  if (config.infiniteX && rect.col < 0) return false;
+  if (!config.infiniteY && (rect.row < 0 || rect.row + rect.h > config.rows)) {
+    return false;
+  }
+  return !config.infiniteY || rect.row >= 0;
+}
+
+function assertValidLayout(config: GridConfig, tiles: readonly Tile[]): void {
+  const ids = new Set<string>();
+  const placed: Tile[] = [];
+
+  for (const tile of tiles) {
+    if (ids.has(tile.id)) {
+      throw new Error(`Griddle: duplicate tile id "${tile.id}"`);
+    }
+    ids.add(tile.id);
+    assertPositiveInteger(tile.w, `tile "${tile.id}" width`);
+    assertPositiveInteger(tile.h, `tile "${tile.id}" height`);
+    if (!isInFlow(tile)) continue;
+    if (!Number.isInteger(tile.col) || !Number.isInteger(tile.row)) {
+      throw new RangeError(`Griddle: tile "${tile.id}" position must use integer cells`);
+    }
+    const rect = tileRect(tile);
+    if (!rectInConfigBounds(config, rect)) {
+      throw new RangeError(`Griddle: tile "${tile.id}" is outside the grid bounds`);
+    }
+    const collision = placed.find((other) => rectsOverlap(tileRect(other), rect));
+    if (collision) {
+      throw new RangeError(
+        `Griddle: tiles "${collision.id}" and "${tile.id}" overlap`,
+      );
+    }
+    placed.push(tile);
+  }
+}
+
 function findNearestFreeCell(
   grid: Grid,
   victim: Tile,
@@ -80,7 +126,9 @@ export class Grid {
   constructor(config: GridConfig, initialTiles: Tile[] = []) {
     this.config = defaultConfig(config);
     assertLoopable(this.config);
-    for (const t of initialTiles) this.tilesById.set(t.id, { ...t });
+    const tiles = initialTiles.map((tile) => ({ ...tile }));
+    assertValidLayout(this.config, tiles);
+    for (const tile of tiles) this.tilesById.set(tile.id, tile);
     // Note: no auto-pack here even when loop starts enabled — packing fires
     // only on the loop off->on toggle (see updateConfig). Constructing or
     // loading a snapshot respects the stored layout as-is.
@@ -98,6 +146,7 @@ export class Grid {
         : this.config.animation,
     });
     assertLoopable(next);
+    assertValidLayout(next, this.tiles);
     this.config = next;
     this.changes.emit({ type: 'config', tileIds: [] });
     // Loop repeats the content's bounding box; holes inside it would repeat
@@ -190,7 +239,9 @@ export class Grid {
     if (this.tilesById.has(tile.id)) {
       throw new Error(`Griddle: duplicate tile id "${tile.id}"`);
     }
-    this.tilesById.set(tile.id, { ...tile });
+    const next = { ...tile };
+    assertValidLayout(this.config, [...this.tiles, next]);
+    this.tilesById.set(tile.id, next);
     this.changes.emit({ type: 'add', tileIds: [tile.id] });
     if (this.config.gravity && this.config.gravity !== 'none') {
       this.compactAll();
@@ -207,6 +258,13 @@ export class Grid {
     if (this.tilesById.has(tile.id)) {
       throw new Error(`Griddle: duplicate tile id "${tile.id}"`);
     }
+    assertPositiveInteger(tile.w, `tile "${tile.id}" width`);
+    assertPositiveInteger(tile.h, `tile "${tile.id}" height`);
+    if (!isInFlow(tile)) {
+      this.addTile(tile);
+      return true;
+    }
+    if (!Number.isInteger(tile.col) || !Number.isInteger(tile.row)) return false;
     const newRect: CellRect = { col: tile.col, row: tile.row, w: tile.w, h: tile.h };
     if (!this.rectInBounds(newRect)) return false;
 
@@ -247,6 +305,13 @@ export class Grid {
         this.restoreTiles(snapshot);
         return false;
       }
+    }
+
+    try {
+      assertValidLayout(this.config, this.tiles);
+    } catch {
+      this.restoreTiles(snapshot);
+      return false;
     }
 
     this.changes.emit({ type: 'add', tileIds: [tile.id] });
@@ -301,8 +366,15 @@ export class Grid {
     if (!tile) return false;
     if (!isInFlow(tile)) return false;
     if (tile.col === target.col && tile.row === target.row) return true;
+    const snapshot = this.snapshotTiles();
     const ok = moveEngine(this, id, target);
     if (ok) {
+      try {
+        assertValidLayout(this.config, this.tiles);
+      } catch {
+        this.restoreTiles(snapshot);
+        return false;
+      }
       this.changes.emit({ type: 'move', tileIds: this.tiles.map((t) => t.id) });
       if (this.config.gravity && this.config.gravity !== 'none') {
         this.compactAll();
@@ -383,6 +455,13 @@ export class Grid {
       }
     }
 
+    try {
+      assertValidLayout(this.config, this.tiles);
+    } catch {
+      this.restoreTiles(snapshot);
+      return false;
+    }
+
     this.changes.emit({ type: 'move', tileIds: this.tiles.map((t) => t.id) });
     if (this.config.gravity && this.config.gravity !== 'none') {
       this.compactAll();
@@ -434,10 +513,19 @@ export class Grid {
   ): boolean {
     const tile = this.tilesById.get(id);
     if (!tile) return false;
-    tile.position = position;
-    if (opts.pinned !== undefined) tile.pinned = { ...opts.pinned };
-    if (opts.offset !== undefined) tile.offset = { ...opts.offset };
-    if (opts.sticky !== undefined) tile.sticky = { ...opts.sticky };
+    const candidate: Tile = { ...tile, position };
+    if (opts.pinned !== undefined) candidate.pinned = { ...opts.pinned };
+    if (opts.offset !== undefined) candidate.offset = { ...opts.offset };
+    if (opts.sticky !== undefined) candidate.sticky = { ...opts.sticky };
+    try {
+      assertValidLayout(
+        this.config,
+        this.tiles.map((current) => current.id === id ? candidate : current),
+      );
+    } catch {
+      return false;
+    }
+    Object.assign(tile, candidate);
     this.changes.emit({ type: 'move', tileIds: [id] });
     return true;
   }
@@ -509,6 +597,13 @@ export class Grid {
           return false;
         }
       }
+    }
+
+    try {
+      assertValidLayout(this.config, this.tiles);
+    } catch {
+      this.restoreTiles(snapshot);
+      return false;
     }
 
     this.changes.emit({ type: 'resize', tileIds: [id] });
@@ -609,8 +704,9 @@ export class Grid {
   /**
    * Replace this grid's config and tiles with a snapshot, in bulk. Unlike
    * add/remove/resize this has no side effects (no gravity compaction, no
-   * structural repack, no pack-on-toggle) — the stored layout is restored
-   * verbatim. Emits a single 'load' event.
+   * structural repack, no pack-on-toggle). Invalid snapshots are rejected
+   * atomically so the grid can never enter an overlapping/out-of-bounds state.
+   * Emits a single 'load' event.
    */
   loadJSON(snap: GridSnapshot): void {
     if (snap.version !== 1) {
@@ -618,9 +714,11 @@ export class Grid {
     }
     const next = defaultConfig(snap.config);
     assertLoopable(next);
+    const tiles = snap.tiles.map((tile) => ({ ...tile }));
+    assertValidLayout(next, tiles);
     this.config = next;
     this.tilesById.clear();
-    for (const t of snap.tiles) this.tilesById.set(t.id, { ...t });
+    for (const tile of tiles) this.tilesById.set(tile.id, tile);
     this.changes.emit({ type: 'load', tileIds: this.tiles.map((t) => t.id) });
   }
 

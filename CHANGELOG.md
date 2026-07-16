@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+## 0.1.6 - 2026-07-16
+
+### Changed
+
+- In-flow tile geometry is now a core invariant: construction, direct adds,
+  config updates, snapshot loads, reflow placements, and transitions back into
+  flow reject out-of-bounds or overlapping layouts atomically.
+- `addTileWithDisplacement()` remains the explicit API for inserting a tile at
+  an occupied position while moving neighbors into legal slots.
+
+### Fixed
+
+- Negative-row and overlapping explicit reflow placements can no longer enter
+  the engine state.
+
+### Compatibility
+
+- `@griddle/react`, `@griddle/vue`, and `@griddle/svelte` 0.1.6 require
+  `@griddle/core` 0.1.6 or newer within the 0.1 release line.
+
 ## 0.1.5 - 2026-07-15
 
 ### Added

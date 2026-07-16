@@ -312,6 +312,61 @@ test('add/remove/query', () => {
   eq(g.tiles.length, 1);
 });
 
+test('constructor rejects overlapping and out-of-bounds in-flow tiles', () => {
+  const config = { cols: 4, rows: Infinity, unitWidth: 50, unitHeight: 50 };
+  const invalidLayouts = [
+    [
+      { id: 'a', col: 0, row: 0, w: 2, h: 2 },
+      { id: 'b', col: 1, row: 1, w: 2, h: 2 },
+    ],
+    [{ id: 'outside', col: 3, row: 0, w: 2, h: 2 }],
+    [{ id: 'negative', col: 0, row: -1, w: 1, h: 1 }],
+  ];
+
+  for (const tiles of invalidLayouts) {
+    let threw = false;
+    try {
+      new Grid(config, tiles);
+    } catch {
+      threw = true;
+    }
+    assert(threw, `constructor must reject ${JSON.stringify(tiles)}`);
+  }
+});
+
+test('addTile rejects illegal geometry without mutating the grid', () => {
+  const g = new Grid(
+    { cols: 4, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [{ id: 'a', col: 0, row: 0, w: 2, h: 2 }],
+  );
+
+  for (const tile of [
+    { id: 'overlap', col: 1, row: 1, w: 2, h: 2 },
+    { id: 'outside', col: 4, row: 0, w: 1, h: 1 },
+  ]) {
+    let threw = false;
+    try {
+      g.addTile(tile);
+    } catch {
+      threw = true;
+    }
+    assert(threw, `addTile must reject ${tile.id}`);
+  }
+  deepEq(g.tiles.map((tile) => tile.id), ['a']);
+});
+
+test('addTileWithDisplacement remains the explicit collision-resolving add path', () => {
+  const g = new Grid(
+    { cols: 4, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [{ id: 'a', col: 0, row: 0, w: 2, h: 2 }],
+  );
+
+  assert(g.addTileWithDisplacement({ id: 'b', col: 0, row: 0, w: 2, h: 2 }));
+  const [a, b] = g.tiles;
+  assert(!rectsOverlap(a, b), 'displacement add must finish without overlap');
+  assert(g.tiles.every((tile) => tile.col >= 0 && tile.col + tile.w <= 4));
+});
+
 // ---- Explicit reflow --------------------------------------------------
 
 for (const fixture of preserveV1ParityFixtures) {
@@ -387,17 +442,27 @@ test('Reflow preserve-v1 scales height at rounding and minimum boundaries', () =
   deepEq({ w: byId.get('already-fits').w, h: byId.get('already-fits').h }, { w: 4, h: 2 });
 });
 
-test('Reflow preserve-v1 keeps supplied unusual geometry verbatim', () => {
-  const result = reflowTiles(
-    [{ id: 'placed', col: 0, row: 0, w: 2, h: 2 }],
+test('Reflow preserve-v1 rejects illegal explicit placements', () => {
+  const invalidPlacements = [
+    { placed: { col: 7, row: -2, w: 6, h: 0 } },
     {
-      cols: 4,
-      strategy: 'preserve-v1',
-      placements: { placed: { col: 7, row: -2, w: 6, h: 0 } },
+      a: { col: 0, row: 0, w: 2, h: 2 },
+      b: { col: 1, row: 1, w: 2, h: 2 },
     },
-  );
+  ];
 
-  deepEq(geometry(result), [{ id: 'placed', col: 7, row: -2, w: 6, h: 0 }]);
+  for (const placements of invalidPlacements) {
+    let threw = false;
+    try {
+      reflowTiles(
+        Object.keys(placements).map((id) => ({ id, col: 0, row: 0, w: 1, h: 1 })),
+        { cols: 4, strategy: 'preserve-v1', placements },
+      );
+    } catch {
+      threw = true;
+    }
+    assert(threw, `reflow must reject ${JSON.stringify(placements)}`);
+  }
 });
 
 test('Reflow rejects invalid columns and unknown strategies', () => {
@@ -461,7 +526,7 @@ test('Grid.reflow returns false when only the target columns change', () => {
   deepEq(events, [{ type: 'reflow', tileIds: [] }]);
 });
 
-test('Grid.updateConfig remains side-effect-free when columns change', () => {
+test('Grid.updateConfig rejects a bounds-breaking column change atomically', () => {
   const g = new Grid(
     { cols: 12, rows: Infinity, unitWidth: 50, unitHeight: 50 },
     [{ id: 'right', col: 8, row: 3, w: 4, h: 2 }],
@@ -470,10 +535,17 @@ test('Grid.updateConfig remains side-effect-free when columns change', () => {
   const events = [];
   g.changes.on((event) => events.push(event));
 
-  g.updateConfig({ cols: 4 });
+  let threw = false;
+  try {
+    g.updateConfig({ cols: 4 });
+  } catch {
+    threw = true;
+  }
 
+  assert(threw, 'shrinking columns around an existing tile must be rejected');
+  eq(g.config.cols, 12);
   deepEq(geometry(g.tiles), before);
-  deepEq(events, [{ type: 'config', tileIds: [] }]);
+  deepEq(events, []);
 });
 
 test('Grid.reflow rejects invalid options without partially mutating state', () => {
@@ -846,6 +918,30 @@ test('toJSON / fromJSON roundtrip', () => {
   eq(g2.config.gravity, 'top');
 });
 
+test('loadJSON rejects an illegal snapshot atomically', () => {
+  const g = new Grid(
+    { cols: 4, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [{ id: 'original', col: 0, row: 0, w: 1, h: 1 }],
+  );
+  const before = g.toJSON();
+  let threw = false;
+  try {
+    g.loadJSON({
+      version: 1,
+      config: before.config,
+      tiles: [
+        { id: 'a', col: 0, row: 0, w: 2, h: 2 },
+        { id: 'b', col: 1, row: 1, w: 2, h: 2 },
+      ],
+    });
+  } catch {
+    threw = true;
+  }
+
+  assert(threw, 'loadJSON must reject overlapping snapshots');
+  deepEq(g.toJSON(), before);
+});
+
 // ---- Positioning ------------------------------------------------------
 
 test('Positioning: absolute tiles are skipped by tilesIn', () => {
@@ -891,6 +987,23 @@ test('Positioning: setTilePosition transitions modes', () => {
   eq(g.getTile('a').row, 4);
   g.addTile({ id: 'b', col: 3, row: 4, w: 1, h: 1 });
   eq(g.getTile('b').col, 3);
+});
+
+test('Positioning: setTilePosition cannot return an out-of-flow tile to an occupied slot', () => {
+  const g = new Grid({ cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 });
+  g.addTile({ id: 'flow', col: 0, row: 0, w: 2, h: 2 });
+  g.addTile({
+    id: 'floating',
+    col: 0,
+    row: 0,
+    w: 2,
+    h: 2,
+    position: 'absolute',
+    pinned: { x: 100, y: 100 },
+  });
+
+  assert(!g.setTilePosition('floating', 'static'));
+  eq(g.getTile('floating').position, 'absolute');
 });
 
 test('Positioning: relative tiles still occupy their grid slot', () => {
