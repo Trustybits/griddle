@@ -91,7 +91,7 @@ export function ConfigPanel(props: {
             const parsed = parseInt(e.target.value, 10);
             api.reflow({
               cols: Number.isFinite(parsed) ? Math.max(1, parsed) : 1,
-              strategy: 'preserve-v1',
+              strategy: 'griddle-v1',
             });
           }} />
       </div>

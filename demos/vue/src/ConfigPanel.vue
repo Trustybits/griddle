@@ -229,7 +229,7 @@ function setCols(v: string) {
   const parsed = parseInt(v, 10);
   props.api.reflow({
     cols: Number.isFinite(parsed) ? Math.max(1, parsed) : 1,
-    strategy: 'preserve-v1',
+    strategy: 'griddle-v1',
   });
 }
 function setRows(v: string) {

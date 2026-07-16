@@ -468,6 +468,101 @@ test('Reflow preserve-v1 scales height at rounding and minimum boundaries', () =
   deepEq({ w: byId.get('already-fits').w, h: byId.get('already-fits').h }, { w: 4, h: 2 });
 });
 
+test('Reflow griddle-v1 uses dense packing instead of preserving source gaps', () => {
+  const input = [
+    { id: 'small', col: 0, row: 5, w: 2, h: 2 },
+    { id: 'hero', col: 8, row: 0, w: 4, h: 2 },
+  ];
+
+  deepEq(geometry(reflowTiles(input, { cols: 4, strategy: 'griddle-v1' })), [
+    { id: 'small', col: 0, row: 2, w: 2, h: 2 },
+    { id: 'hero', col: 0, row: 0, w: 4, h: 2 },
+  ]);
+  deepEq(geometry(reflowTiles(input, { cols: 4, strategy: 'preserve-v1' })), [
+    { id: 'small', col: 0, row: 5, w: 2, h: 2 },
+    { id: 'hero', col: 0, row: 0, w: 4, h: 2 },
+  ]);
+});
+
+test('Reflow griddle-v1 trims wide automatic tiles like finite creation', () => {
+  const [tile] = reflowTiles(
+    [{ id: 'wide', col: 7, row: 4, w: 8, h: 5 }],
+    { cols: 4, strategy: 'griddle-v1' },
+  );
+
+  deepEq(geometry([tile]), [
+    { id: 'wide', col: 0, row: 0, w: 4, h: 5 },
+  ]);
+});
+
+test('Reflow griddle-v1 keeps explicit placements exact and packs around them', () => {
+  const data = { deliberate: true };
+  const input = [
+    { id: 'fixed', col: 8, row: 8, w: 1, h: 1, data },
+    { id: 'large', col: 0, row: 0, w: 2, h: 2 },
+    { id: 'small', col: 2, row: 0, w: 1, h: 1 },
+  ];
+  const result = reflowTiles(input, {
+    cols: 4,
+    strategy: 'griddle-v1',
+    placements: {
+      fixed: { col: 2, row: 0, w: 2, h: 2 },
+      missing: { col: 0, row: 20, w: 4, h: 4 },
+    },
+  });
+
+  deepEq(geometry(result), [
+    { id: 'fixed', col: 2, row: 0, w: 2, h: 2 },
+    { id: 'large', col: 0, row: 0, w: 2, h: 2 },
+    { id: 'small', col: 0, row: 2, w: 1, h: 1 },
+  ]);
+  eq(result[0].data, data, 'anchored tile metadata must survive');
+});
+
+test('Reflow griddle-v1 preserves complete placements without repacking', () => {
+  const placements = {
+    a: { col: 3, row: 7, w: 1, h: 2 },
+    b: { col: 0, row: 4, w: 3, h: 3 },
+  };
+  const result = reflowTiles([
+    { id: 'a', col: 0, row: 0, w: 2, h: 2 },
+    { id: 'b', col: 8, row: 0, w: 4, h: 2 },
+  ], { cols: 4, strategy: 'griddle-v1', placements });
+
+  deepEq(geometry(result), [
+    { id: 'a', ...placements.a },
+    { id: 'b', ...placements.b },
+  ]);
+});
+
+test('Reflow griddle-v1 ignores placement maps with only stale tile IDs', () => {
+  const input = [
+    { id: 'a', col: 0, row: 5, w: 3, h: 2 },
+    { id: 'b', col: 8, row: 0, w: 2, h: 2 },
+  ];
+  const automatic = reflowTiles(input, { cols: 4, strategy: 'griddle-v1' });
+  const stale = reflowTiles(input, {
+    cols: 4,
+    strategy: 'griddle-v1',
+    placements: { deleted: { col: 0, row: 20, w: 4, h: 4 } },
+  });
+
+  deepEq(stale, automatic);
+});
+
+test('Reflow griddle-v1 is deterministic and does not mutate its input', () => {
+  const input = [
+    { id: 'b', col: 8, row: 0, w: 3, h: 2 },
+    { id: 'a', col: 0, row: 6, w: 3, h: 2 },
+    { id: 'c', col: 4, row: 3, w: 2, h: 1 },
+  ];
+  const before = JSON.parse(JSON.stringify(input));
+  const options = { cols: 4, strategy: 'griddle-v1' };
+
+  deepEq(reflowTiles(input, options), reflowTiles(input, options));
+  deepEq(input, before);
+});
+
 test('Reflow preserve-v1 rejects illegal explicit placements', () => {
   const invalidPlacements = [
     { placed: { col: 7, row: -2, w: 6, h: 0 } },
@@ -477,17 +572,19 @@ test('Reflow preserve-v1 rejects illegal explicit placements', () => {
     },
   ];
 
-  for (const placements of invalidPlacements) {
-    let threw = false;
-    try {
-      reflowTiles(
-        Object.keys(placements).map((id) => ({ id, col: 0, row: 0, w: 1, h: 1 })),
-        { cols: 4, strategy: 'preserve-v1', placements },
-      );
-    } catch {
-      threw = true;
+  for (const strategy of ['preserve-v1', 'griddle-v1']) {
+    for (const placements of invalidPlacements) {
+      let threw = false;
+      try {
+        reflowTiles(
+          Object.keys(placements).map((id) => ({ id, col: 0, row: 0, w: 1, h: 1 })),
+          { cols: 4, strategy, placements },
+        );
+      } catch {
+        threw = true;
+      }
+      assert(threw, `${strategy} must reject ${JSON.stringify(placements)}`);
     }
-    assert(threw, `reflow must reject ${JSON.stringify(placements)}`);
   }
 });
 
@@ -550,6 +647,25 @@ test('Grid.reflow returns false when only the target columns change', () => {
   assert(!changed, 'unchanged geometry should return false');
   eq(g.config.cols, 8);
   deepEq(events, [{ type: 'reflow', tileIds: [] }]);
+});
+
+test('Grid.reflow installs griddle-v1 packed geometry atomically', () => {
+  const g = new Grid(
+    { cols: 12, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [
+      { id: 'small', col: 0, row: 5, w: 2, h: 2 },
+      { id: 'hero', col: 8, row: 0, w: 4, h: 2 },
+    ],
+  );
+  const events = [];
+  g.changes.on((event) => events.push(event));
+
+  assert(g.reflow({ cols: 4, strategy: 'griddle-v1' }));
+  deepEq(geometry(g.tiles), [
+    { id: 'small', col: 0, row: 2, w: 2, h: 2 },
+    { id: 'hero', col: 0, row: 0, w: 4, h: 2 },
+  ]);
+  deepEq(events, [{ type: 'reflow', tileIds: ['small', 'hero'] }]);
 });
 
 test('Grid.updateConfig rejects a bounds-breaking column change atomically', () => {

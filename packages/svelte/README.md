@@ -44,7 +44,7 @@ Changing `cols` through `updateConfig()` does not relocate tiles. Use the
 versioned reflow operation when a finite-column change should adapt geometry:
 
 ```js
-api.reflow({ cols: 4, strategy: 'preserve-v1' });
+api.reflow({ cols: 4, strategy: 'griddle-v1' });
 ```
 
 Griddle has no breakpoint model, and reflow remains separate from `pack()` and

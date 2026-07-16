@@ -5,10 +5,11 @@
 // count. Strategy identifiers are immutable compatibility contracts.
 
 import { rectsOverlap, tileRect } from './geometry.js';
+import { computePack, computePackAround } from './packing.js';
 import type { CellRect, Tile } from './types.js';
 
 /** Immutable identifier for a supported reflow algorithm. */
-export type ReflowStrategy = 'preserve-v1';
+export type ReflowStrategy = 'preserve-v1' | 'griddle-v1';
 
 /** Options for a single explicit reflow operation. */
 export interface ReflowOptions {
@@ -24,9 +25,20 @@ function assertOptions(options: ReflowOptions): void {
   if (!Number.isFinite(options.cols) || !Number.isInteger(options.cols) || options.cols <= 0) {
     throw new RangeError('Griddle: reflow cols must be a positive finite integer');
   }
-  if (options.strategy !== 'preserve-v1') {
+  if (options.strategy !== 'preserve-v1' && options.strategy !== 'griddle-v1') {
     throw new RangeError(`Griddle: unsupported reflow strategy "${String(options.strategy)}"`);
   }
+}
+
+/**
+ * Match Griddle's finite-edge creation/resize behavior: trim an automatic
+ * tile's width to the available columns without changing its height.
+ */
+function trimTileToColumns(tile: Tile, cols: number): Tile {
+  if (!Number.isInteger(tile.w) || tile.w <= 0 || !Number.isInteger(tile.h) || tile.h <= 0) {
+    throw new RangeError(`Griddle: tile "${tile.id}" footprint must use positive integer cells`);
+  }
+  return tile.w > cols ? { ...tile, w: cols } : { ...tile };
 }
 
 function scaleTileToFit(tile: Tile, cols: number): Tile {
@@ -170,6 +182,77 @@ function reflowWithPlacements(
   return projected;
 }
 
+function applyPackedPositions(
+  tiles: readonly Tile[],
+  positions: ReadonlyMap<string, { col: number; row: number }>,
+): Tile[] {
+  return tiles.map((tile) => {
+    const position = positions.get(tile.id);
+    return position ? { ...tile, ...position } : { ...tile };
+  });
+}
+
+/**
+ * Griddle-native automatic reflow. Unlike preserve-v1, this intentionally
+ * discards source gaps and positions, trims wide tiles like finite creation,
+ * and runs the dense exact/greedy packer used by `Grid.pack()`.
+ */
+function reflowGriddle(tiles: readonly Tile[], cols: number): Tile[] {
+  const fitted = tiles.map((tile) => trimTileToColumns(tile, cols));
+  const packed = computePack(
+    fitted.map(({ id, w, h }) => ({ id, w, h })),
+    cols,
+  );
+  if (!packed) return fitted;
+
+  const result = applyPackedPositions(fitted, packed.placements);
+  assertFiniteLayout(result, cols);
+  return result;
+}
+
+/**
+ * Explicit placements are immutable anchors. Only unplaced tiles are trimmed
+ * and densely packed, using Griddle's greedy pack ordering around those
+ * anchors. Unknown placement ids are ignored.
+ */
+function reflowGriddleWithPlacements(
+  tiles: readonly Tile[],
+  cols: number,
+  placements: Readonly<Record<string, CellRect>>,
+): Tile[] {
+  const anchored: Tile[] = [];
+  const automatic: Tile[] = [];
+
+  for (const tile of tiles) {
+    const placement = placements[tile.id];
+    if (placement) anchored.push({ ...tile, ...placement });
+    else automatic.push(trimTileToColumns(tile, cols));
+  }
+
+  // User-authored placements are exact compatibility data: never trim, move,
+  // or silently resolve them. Invalid anchors reject the transaction.
+  assertFiniteLayout(anchored, cols);
+
+  const packed = computePackAround(
+    automatic.map(({ id, w, h }) => ({ id, w, h })),
+    cols,
+    anchored.map(({ id, col, row, w, h }) => ({ id, col, row, w, h })),
+  );
+  if (!packed) return anchored;
+
+  const anchoredById = new Map(anchored.map((tile) => [tile.id, tile]));
+  const automaticById = new Map(automatic.map((tile) => [tile.id, tile]));
+  const result = tiles.map((tile) => {
+    const anchor = anchoredById.get(tile.id);
+    if (anchor) return { ...anchor };
+    const fitted = automaticById.get(tile.id)!;
+    const position = packed.placements.get(tile.id)!;
+    return { ...fitted, ...position };
+  });
+  assertFiniteLayout(result, cols);
+  return result;
+}
+
 /**
  * Reflow tiles with an explicit immutable strategy. The input is never
  * mutated, and every non-geometry tile property is preserved.
@@ -180,7 +263,14 @@ export function reflowTiles(
 ): Tile[] {
   assertOptions(options);
   const placements = options.placements;
-  return placements && Object.keys(placements).length > 0
-    ? reflowWithPlacements(tiles, options.cols, placements)
-    : reflowWithoutPlacements(tiles, options.cols);
+  if (options.strategy === 'preserve-v1') {
+    return placements && Object.keys(placements).length > 0
+      ? reflowWithPlacements(tiles, options.cols, placements)
+      : reflowWithoutPlacements(tiles, options.cols);
+  }
+  const hasMatchingPlacement =
+    placements !== undefined && tiles.some((tile) => placements[tile.id] !== undefined);
+  return placements && hasMatchingPlacement
+    ? reflowGriddleWithPlacements(tiles, options.cols, placements)
+    : reflowGriddle(tiles, options.cols);
 }

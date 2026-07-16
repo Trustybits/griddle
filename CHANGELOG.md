@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.1.9 - 2026-07-16
+
+### Added
+
+- Added the immutable `griddle-v1` reflow strategy. Automatic tiles use
+  Griddle's finite-edge width trimming and dense exact/greedy packing, while
+  valid caller placements remain exact, immovable anchors.
+
+### Changed
+
+- React, Vue, and Svelte demos now exercise `griddle-v1` for finite-column
+  reflow. The compatibility-focused `preserve-v1` strategy remains supported
+  without behavior changes.
+
+### Compatibility
+
+- `@griddle/react`, `@griddle/vue`, and `@griddle/svelte` 0.1.9 require
+  `@griddle/core` 0.1.9 or newer within the 0.1 release line.
+
 ## 0.1.8 - 2026-07-16
 
 ### Fixed

@@ -90,12 +90,13 @@ Changing `cols` with `updateConfig()` never relocates tiles. Use the versioned
 reflow operation when a finite-width change should also adapt geometry:
 
 ```ts
-grid.reflow({ cols: 4, strategy: 'preserve-v1' });
+grid.reflow({ cols: 4, strategy: 'griddle-v1' });
 ```
 
 Griddle does not know about breakpoints; callers choose the target columns and
-may provide generic pre-positioned geometry through `placements`. Reflow is
-separate from dense `pack()` and gravity. See `docs/reflow.md`.
+may provide generic pre-positioned geometry through `placements`. The
+`griddle-v1` strategy densely packs automatic tiles while treating supplied
+placements as immovable anchors. See `docs/reflow.md`.
 
 ## Animation configuration
 
