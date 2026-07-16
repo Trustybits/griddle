@@ -788,6 +788,36 @@ test('Rule 3-5: large dragger displaces small partially-overlapping victim', () 
   eq(b.row, 7);
 });
 
+test('Rule 3-5: small dragger dropped in the center displaces a containing larger tile', () => {
+  const g = new Grid({
+    cols: 8,
+    rows: Infinity,
+    unitWidth: 75,
+    unitHeight: 75,
+    gravity: 'top',
+  });
+  g.addTile({ id: 'large', col: 2, row: 1, w: 4, h: 4 });
+  g.addTile({ id: 'small', col: 0, row: 0, w: 1, h: 1 });
+  const largeBefore = { col: g.getTile('large').col, row: g.getTile('large').row };
+
+  const ok = g.moveTile('small', { col: 3, row: 2 });
+
+  assert(ok, 'center drop should be accepted');
+  const small = g.getTile('small');
+  const large = g.getTile('large');
+  assert(
+    !rectsOverlap(small, large),
+    'the containing tile must move fully clear of the small dragger',
+  );
+  assert(
+    !(large.col === largeBefore.col && large.row === largeBefore.row),
+    'the larger collision victim must move',
+  );
+  for (const tile of g.tiles) {
+    assert(g.rectInBounds(tile), `${tile.id} must remain inside the grid`);
+  }
+});
+
 test('Rule 3-5: two stacked victims displaced by 2x2 dragger do not collide', () => {
   // 2x2 dragger lands on (0,0). Two 1x1 victims A, B occupy column 0 rows 0-1.
   // After displacement they must NOT both land on the same cell — earlier the

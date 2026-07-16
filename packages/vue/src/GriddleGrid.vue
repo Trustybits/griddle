@@ -112,6 +112,11 @@ import {
 import type { TileLayout } from '@griddle/core';
 import type { GriddleApi } from './useGriddle.js';
 import { animateReposition, liftTransition } from './animation.js';
+import {
+  measureInteractionScale,
+  toLocalInteractionDelta,
+  type InteractionScale,
+} from './interaction.js';
 
 const props = defineProps<{
   api: GriddleApi;
@@ -208,6 +213,7 @@ interface DragVisual {
 const drag = ref<DragVisual | null>(null);
 let dragStartPointerX = 0;
 let dragStartPointerY = 0;
+let interactionScale: InteractionScale = { x: 1, y: 1 };
 
 interface GroupDragVisual {
   tileIds: string[];
@@ -277,6 +283,7 @@ function beginPendingDrag(pending: PendingDragState): boolean {
 
   dragStartPointerX = pending.startPointerX;
   dragStartPointerY = pending.startPointerY;
+  interactionScale = measureInteractionScale(scrollEl.value);
 
   if (pending.mode === 'pin') {
     const layout = computeTileLayout({
@@ -411,6 +418,7 @@ function onBackgroundPointerDown(e: PointerEvent) {
 function onResizeHandleDown(e: PointerEvent, tile: Tile, c: Corner) {
   if (tile.resizable === false) return;
   (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+  interactionScale = measureInteractionScale(scrollEl.value);
   resize.value = {
     tileId: tile.id,
     corner: c,
@@ -461,15 +469,21 @@ function onPointerMove(e: PointerEvent) {
   const d = drag.value;
   const r = resize.value;
   if (pd) {
-    const dx = e.clientX - pd.startPointerX;
-    const dy = e.clientY - pd.startPointerY;
+    const { dx, dy } = toLocalInteractionDelta(
+      e.clientX - pd.startPointerX,
+      e.clientY - pd.startPointerY,
+      interactionScale,
+    );
     const newPinPx = { x: pd.startPinPx.x + dx, y: pd.startPinPx.y + dy };
     const newPin = pixelsToPin(newPinPx, config.value);
     props.api.grid.setTilePinned(pd.tileId, newPin);
   }
   if (gd) {
-    const dx = e.clientX - dragStartPointerX;
-    const dy = e.clientY - dragStartPointerY;
+    const { dx, dy } = toLocalInteractionDelta(
+      e.clientX - dragStartPointerX,
+      e.clientY - dragStartPointerY,
+      interactionScale,
+    );
     const dcol = Math.round(dx / colSize.value);
     const drow = Math.round(dy / rowSize.value);
     const result = groupDragController.update({ dcol, drow });
@@ -483,8 +497,11 @@ function onPointerMove(e: PointerEvent) {
     if (result.changed) syncTiles();
   }
   if (d) {
-    const dx = e.clientX - dragStartPointerX;
-    const dy = e.clientY - dragStartPointerY;
+    const { dx, dy } = toLocalInteractionDelta(
+      e.clientX - dragStartPointerX,
+      e.clientY - dragStartPointerY,
+      interactionScale,
+    );
     const candidateCol = d.pickupCol + Math.round(dx / colSize.value);
     const candidateRow = d.pickupRow + Math.round(dy / rowSize.value);
     const result = dragController.update({ col: candidateCol, row: candidateRow });
@@ -501,8 +518,11 @@ function onPointerMove(e: PointerEvent) {
     if (result.changed) syncTiles();
   }
   if (r) {
-    const dx = e.clientX - r.startPointerX;
-    const dy = e.clientY - r.startPointerY;
+    const { dx, dy } = toLocalInteractionDelta(
+      e.clientX - r.startPointerX,
+      e.clientY - r.startPointerY,
+      interactionScale,
+    );
     let dw = 0, dh = 0, dcol = 0, drow = 0;
     const stepsX = Math.round(dx / colSize.value);
     const stepsY = Math.round(dy / rowSize.value);
