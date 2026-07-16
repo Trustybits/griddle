@@ -23,9 +23,15 @@
   }
   function setColsFromEvent(e: Event) {
     const el = e.currentTarget as HTMLInputElement;
-    const v = el.value;
-    const n = v === '' ? Infinity : Math.max(1, parseInt(v, 10));
-    api.updateConfig({ cols: n, infiniteX: n === Infinity });
+    if (el.value === '') {
+      api.updateConfig({ cols: Infinity, infiniteX: true });
+      return;
+    }
+    const parsed = parseInt(el.value, 10);
+    api.reflow({
+      cols: Number.isFinite(parsed) ? Math.max(1, parsed) : 1,
+      strategy: 'preserve-v1',
+    });
   }
   function setRowsFromEvent(e: Event) {
     const el = e.currentTarget as HTMLInputElement;
@@ -112,7 +118,7 @@
   <p>Svelte demo</p>
 
   <div class="h">Grid</div>
-  <div class="row"><span>Columns</span>
+  <div class="row"><span>Columns (reflow)</span>
     <input type="number" min="1" value={cfg.cols === Infinity ? '' : cfg.cols}
       placeholder={cfg.cols === Infinity ? '∞' : ''}
       on:input={setColsFromEvent}/>

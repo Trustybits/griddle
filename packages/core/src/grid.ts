@@ -10,6 +10,7 @@ import type {
   GridSnapshot,
   Tile,
 } from './types.js';
+import type { ReflowOptions } from './reflow.js';
 import { Emitter } from './events.js';
 import {
   directionStep,
@@ -26,6 +27,7 @@ import { isInFlow } from './positioning.js';
 import { assertLoopable, loopEnabled } from './loop.js';
 import { computePack } from './packing.js';
 import { resolveAnimationConfig } from './animation.js';
+import { reflowTiles } from './reflow.js';
 
 function defaultConfig(c: GridConfig): GridConfig {
   return {
@@ -101,6 +103,44 @@ export class Grid {
     // Loop repeats the content's bounding box; holes inside it would repeat
     // too, so entering loop mode compacts the layout into a dense block.
     if (!wasLooping && loopEnabled(next)) this.pack();
+  }
+
+  /**
+   * Explicitly reflow all in-flow tiles to a finite column count. Geometry and
+   * config are installed atomically; gravity and dense packing remain separate
+   * caller-controlled operations. Returns whether any tile geometry changed.
+   */
+  reflow(options: ReflowOptions): boolean {
+    const flow = this.tiles.filter(isInFlow);
+    const projected = reflowTiles(flow, options);
+    const projectedById = new Map(projected.map((tile) => [tile.id, tile]));
+    const nextConfig = defaultConfig({
+      ...this.config,
+      cols: options.cols,
+      infiniteX: false,
+    });
+    assertLoopable(nextConfig);
+
+    const changedIds: string[] = [];
+    for (const tile of flow) {
+      const next = projectedById.get(tile.id);
+      if (!next) continue;
+      if (
+        tile.col !== next.col ||
+        tile.row !== next.row ||
+        tile.w !== next.w ||
+        tile.h !== next.h
+      ) {
+        changedIds.push(tile.id);
+      }
+    }
+
+    this.config = nextConfig;
+    for (const tile of projected) {
+      this._setTileRect(tile.id, tile);
+    }
+    this.changes.emit({ type: 'reflow', tileIds: changedIds });
+    return changedIds.length > 0;
   }
 
   // ---- tile queries -------------------------------------------------------

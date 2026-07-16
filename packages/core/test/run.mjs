@@ -3,7 +3,9 @@
 
 import {
   Grid,
+  reflowTiles,
   priorityDirections,
+  rectsOverlap,
   rectsAdjacent,
   footprintEquals,
   wrapValue,
@@ -46,6 +48,187 @@ function deepEq(a, b, msg) {
     throw new Error(`${msg || 'deepEq'}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
   }
 }
+
+function geometry(tiles) {
+  return tiles.map(({ id, col, row, w, h }) => ({ id, col, row, w, h }));
+}
+
+const preserveV1ParityFixtures = [
+  {
+    name: '12 to 8 preserves valid positions, gaps, and input order',
+    tiles: [
+      { id: 'late', col: 4, row: 3, w: 3, h: 2 },
+      { id: 'early', col: 0, row: 0, w: 4, h: 2 },
+      { id: 'lower', col: 0, row: 6, w: 2, h: 1 },
+    ],
+    options: { cols: 8, strategy: 'preserve-v1' },
+    expected: [
+      { id: 'late', col: 4, row: 3, w: 3, h: 2 },
+      { id: 'early', col: 0, row: 0, w: 4, h: 2 },
+      { id: 'lower', col: 0, row: 6, w: 2, h: 1 },
+    ],
+  },
+  {
+    name: '12 to 4 relocates horizontally out-of-bounds tiles',
+    tiles: [
+      { id: 'right', col: 8, row: 2, w: 3, h: 2 },
+      { id: 'left', col: 0, row: 0, w: 2, h: 2 },
+      { id: 'bottom', col: 2, row: 4, w: 2, h: 2 },
+    ],
+    options: { cols: 4, strategy: 'preserve-v1' },
+    expected: [
+      { id: 'right', col: 0, row: 2, w: 3, h: 2 },
+      { id: 'left', col: 0, row: 0, w: 2, h: 2 },
+      { id: 'bottom', col: 2, row: 4, w: 2, h: 2 },
+    ],
+  },
+  {
+    name: 'collisions use stable tile IDs while returning input order',
+    tiles: [
+      { id: 'b', col: 0, row: 0, w: 2, h: 2 },
+      { id: 'a', col: 0, row: 0, w: 2, h: 2 },
+      { id: 'c', col: 2, row: 0, w: 2, h: 2 },
+    ],
+    options: { cols: 4, strategy: 'preserve-v1' },
+    expected: [
+      { id: 'b', col: 2, row: 0, w: 2, h: 2 },
+      { id: 'a', col: 0, row: 0, w: 2, h: 2 },
+      { id: 'c', col: 0, row: 2, w: 2, h: 2 },
+    ],
+  },
+  {
+    name: '12 to 8 scales an oversized tile and rounds height proportionally',
+    tiles: [{ id: 'wide', col: 0, row: 5, w: 12, h: 4 }],
+    options: { cols: 8, strategy: 'preserve-v1' },
+    expected: [{ id: 'wide', col: 0, row: 5, w: 8, h: 3 }],
+  },
+  {
+    name: 'an empty placement map uses automatic 12 to 4 projection',
+    tiles: [
+      { id: 'lower', col: 0, row: 3, w: 6, h: 3 },
+      { id: 'upper', col: 6, row: 0, w: 6, h: 3 },
+    ],
+    options: { cols: 4, strategy: 'preserve-v1', placements: {} },
+    expected: [
+      { id: 'lower', col: 0, row: 3, w: 4, h: 2 },
+      { id: 'upper', col: 0, row: 0, w: 4, h: 2 },
+    ],
+  },
+  {
+    name: 'partial placements lead and missing tiles fill around them',
+    tiles: [
+      { id: 'missing-before', col: 0, row: 0, w: 6, h: 3 },
+      { id: 'custom', col: 4, row: 4, w: 2, h: 2 },
+      { id: 'missing-after', col: 8, row: 0, w: 2, h: 2 },
+    ],
+    options: {
+      cols: 4,
+      strategy: 'preserve-v1',
+      placements: {
+        custom: { col: 0, row: 2, w: 2, h: 2 },
+        'missing-tile-id': { col: 2, row: 10, w: 2, h: 2 },
+      },
+    },
+    expected: [
+      { id: 'custom', col: 0, row: 2, w: 2, h: 2 },
+      { id: 'missing-before', col: 0, row: 0, w: 4, h: 2 },
+      { id: 'missing-after', col: 2, row: 2, w: 2, h: 2 },
+    ],
+  },
+  {
+    name: 'complete placements remain verbatim and preserve input order',
+    tiles: [
+      { id: 'b', col: 0, row: 0, w: 2, h: 2 },
+      { id: 'a', col: 2, row: 0, w: 2, h: 2 },
+    ],
+    options: {
+      cols: 4,
+      strategy: 'preserve-v1',
+      placements: {
+        a: { col: 0, row: 3, w: 2, h: 2 },
+        b: { col: 2, row: 5, w: 2, h: 2 },
+        'missing-tile-id': { col: 0, row: 20, w: 4, h: 1 },
+      },
+    },
+    expected: [
+      { id: 'b', col: 2, row: 5, w: 2, h: 2 },
+      { id: 'a', col: 0, row: 3, w: 2, h: 2 },
+    ],
+  },
+  {
+    name: 'editorial dashboard with a partial tablet arrangement',
+    tiles: [
+      { id: 'hero', col: 0, row: 0, w: 8, h: 4 },
+      { id: 'notes', col: 8, row: 0, w: 4, h: 4 },
+      { id: 'chart', col: 0, row: 4, w: 5, h: 3 },
+      { id: 'links', col: 5, row: 4, w: 3, h: 2 },
+      { id: 'map', col: 8, row: 4, w: 4, h: 5 },
+    ],
+    options: {
+      cols: 8,
+      strategy: 'preserve-v1',
+      placements: {
+        hero: { col: 0, row: 0, w: 8, h: 4 },
+        notes: { col: 0, row: 4, w: 4, h: 3 },
+        map: { col: 4, row: 4, w: 4, h: 4 },
+        archived: { col: 0, row: 30, w: 8, h: 2 },
+      },
+    },
+    expected: [
+      { id: 'hero', col: 0, row: 0, w: 8, h: 4 },
+      { id: 'notes', col: 0, row: 4, w: 4, h: 3 },
+      { id: 'map', col: 4, row: 4, w: 4, h: 4 },
+      { id: 'chart', col: 0, row: 8, w: 5, h: 3 },
+      { id: 'links', col: 5, row: 8, w: 3, h: 2 },
+    ],
+  },
+  {
+    name: 'media collection automatically projects to a mobile stack',
+    tiles: [
+      { id: 'video', col: 6, row: 0, w: 6, h: 4 },
+      { id: 'title', col: 0, row: 0, w: 6, h: 2 },
+      { id: 'quote', col: 0, row: 2, w: 4, h: 3 },
+      { id: 'photo', col: 4, row: 4, w: 8, h: 6 },
+      { id: 'footer', col: 0, row: 10, w: 12, h: 2 },
+    ],
+    options: { cols: 4, strategy: 'preserve-v1' },
+    expected: [
+      { id: 'video', col: 0, row: 1, w: 4, h: 3 },
+      { id: 'title', col: 0, row: 0, w: 4, h: 1 },
+      { id: 'quote', col: 0, row: 4, w: 4, h: 3 },
+      { id: 'photo', col: 0, row: 7, w: 4, h: 3 },
+      { id: 'footer', col: 0, row: 10, w: 4, h: 1 },
+    ],
+  },
+  {
+    name: 'planning board keeps mobile anchors and places new tiles',
+    tiles: [
+      { id: 'notes', col: 0, row: 7, w: 6, h: 4 },
+      { id: 'cover', col: 0, row: 0, w: 12, h: 4 },
+      { id: 'status', col: 8, row: 4, w: 4, h: 3 },
+      { id: 'agenda', col: 0, row: 4, w: 4, h: 3 },
+      { id: 'links', col: 6, row: 7, w: 6, h: 4 },
+      { id: 'people', col: 4, row: 4, w: 4, h: 3 },
+    ],
+    options: {
+      cols: 4,
+      strategy: 'preserve-v1',
+      placements: {
+        cover: { col: 0, row: 0, w: 4, h: 2 },
+        status: { col: 0, row: 2, w: 2, h: 2 },
+        removed: { col: 2, row: 2, w: 2, h: 2 },
+      },
+    },
+    expected: [
+      { id: 'cover', col: 0, row: 0, w: 4, h: 2 },
+      { id: 'status', col: 0, row: 2, w: 2, h: 2 },
+      { id: 'notes', col: 0, row: 4, w: 4, h: 3 },
+      { id: 'agenda', col: 0, row: 7, w: 4, h: 3 },
+      { id: 'links', col: 0, row: 10, w: 4, h: 3 },
+      { id: 'people', col: 0, row: 13, w: 4, h: 3 },
+    ],
+  },
+];
 
 // ---- Geometry ----------------------------------------------------------
 
@@ -127,6 +310,296 @@ test('add/remove/query', () => {
   eq(g.getTile('a').w, 2);
   g.removeTile('a');
   eq(g.tiles.length, 1);
+});
+
+// ---- Explicit reflow --------------------------------------------------
+
+for (const fixture of preserveV1ParityFixtures) {
+  test(`Reflow preserve-v1 parity: ${fixture.name}`, () => {
+    deepEq(
+      geometry(reflowTiles(fixture.tiles, fixture.options)),
+      fixture.expected,
+    );
+  });
+}
+
+test('Reflow preserve-v1 is deterministic and does not mutate its input', () => {
+  const input = [
+    { id: 'b', col: 8, row: 0, w: 6, h: 3 },
+    { id: 'a', col: 0, row: 0, w: 6, h: 3 },
+  ];
+  const before = JSON.parse(JSON.stringify(input));
+  const options = { cols: 4, strategy: 'preserve-v1' };
+
+  const first = reflowTiles(input, options);
+  const second = reflowTiles(input, options);
+
+  deepEq(first, second);
+  deepEq(input, before);
+  assert(first[0] !== input[0], 'reflow must return new tile objects');
+});
+
+test('Reflow preserve-v1 preserves all tile metadata and capabilities', () => {
+  const data = { label: 'wide tile' };
+  const input = [{
+    id: 'wide', col: 9, row: 4, w: 8, h: 5,
+    data,
+    resizeHandles: ['nw', 'se'],
+    draggable: false,
+    resizable: false,
+    minW: 2,
+    minH: 3,
+    maxW: 10,
+    maxH: 12,
+    position: 'relative',
+    pinned: { x: 40, y: 80 },
+    offset: { x: 12, y: -4 },
+    sticky: { edge: 'top', threshold: 6 },
+  }];
+
+  const [tile] = reflowTiles(input, { cols: 4, strategy: 'preserve-v1' });
+
+  deepEq(geometry([tile]), [{ id: 'wide', col: 0, row: 0, w: 4, h: 3 }]);
+  eq(tile.data, data, 'consumer data reference must survive');
+  deepEq(tile.resizeHandles, ['nw', 'se']);
+  eq(tile.draggable, false);
+  eq(tile.resizable, false);
+  eq(tile.minW, 2);
+  eq(tile.minH, 3);
+  eq(tile.maxW, 10);
+  eq(tile.maxH, 12);
+  eq(tile.position, 'relative');
+  deepEq(tile.pinned, { x: 40, y: 80 });
+  deepEq(tile.offset, { x: 12, y: -4 });
+  deepEq(tile.sticky, { edge: 'top', threshold: 6 });
+});
+
+test('Reflow preserve-v1 scales height at rounding and minimum boundaries', () => {
+  const result = reflowTiles([
+    { id: 'round-up', col: 0, row: 0, w: 8, h: 5 },
+    { id: 'minimum', col: 8, row: 0, w: 12, h: 1 },
+    { id: 'already-fits', col: 0, row: 8, w: 4, h: 2 },
+  ], { cols: 4, strategy: 'preserve-v1' });
+  const byId = new Map(result.map((tile) => [tile.id, tile]));
+
+  deepEq({ w: byId.get('round-up').w, h: byId.get('round-up').h }, { w: 4, h: 3 });
+  deepEq({ w: byId.get('minimum').w, h: byId.get('minimum').h }, { w: 4, h: 1 });
+  deepEq({ w: byId.get('already-fits').w, h: byId.get('already-fits').h }, { w: 4, h: 2 });
+});
+
+test('Reflow preserve-v1 keeps supplied unusual geometry verbatim', () => {
+  const result = reflowTiles(
+    [{ id: 'placed', col: 0, row: 0, w: 2, h: 2 }],
+    {
+      cols: 4,
+      strategy: 'preserve-v1',
+      placements: { placed: { col: 7, row: -2, w: 6, h: 0 } },
+    },
+  );
+
+  deepEq(geometry(result), [{ id: 'placed', col: 7, row: -2, w: 6, h: 0 }]);
+});
+
+test('Reflow rejects invalid columns and unknown strategies', () => {
+  const invalidOptions = [
+    { cols: 0, strategy: 'preserve-v1' },
+    { cols: -1, strategy: 'preserve-v1' },
+    { cols: 2.5, strategy: 'preserve-v1' },
+    { cols: Infinity, strategy: 'preserve-v1' },
+    { cols: NaN, strategy: 'preserve-v1' },
+    { cols: 4, strategy: 'latest' },
+  ];
+
+  for (const options of invalidOptions) {
+    let threw = false;
+    try {
+      reflowTiles([], options);
+    } catch {
+      threw = true;
+    }
+    assert(threw, `expected invalid options to throw: ${JSON.stringify(options)}`);
+  }
+});
+
+test('Grid.reflow installs config and geometry before emitting one event', () => {
+  const g = new Grid(
+    { cols: 12, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [
+      { id: 'left', col: 0, row: 0, w: 2, h: 2 },
+      { id: 'right', col: 8, row: 0, w: 4, h: 2 },
+    ],
+  );
+  const events = [];
+  g.changes.on((event) => {
+    events.push(event);
+    eq(g.config.cols, 4, 'listener must observe final columns');
+    deepEq(geometry(g.tiles), [
+      { id: 'left', col: 0, row: 0, w: 2, h: 2 },
+      { id: 'right', col: 0, row: 2, w: 4, h: 2 },
+    ], 'listener must observe final geometry');
+  });
+
+  const changed = g.reflow({ cols: 4, strategy: 'preserve-v1' });
+
+  assert(changed, 'right tile should move');
+  eq(events.length, 1);
+  deepEq(events[0], { type: 'reflow', tileIds: ['right'] });
+});
+
+test('Grid.reflow returns false when only the target columns change', () => {
+  const g = new Grid(
+    { cols: 12, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [{ id: 'a', col: 0, row: 0, w: 2, h: 2 }],
+  );
+  const events = [];
+  g.changes.on((event) => events.push(event));
+
+  const changed = g.reflow({ cols: 8, strategy: 'preserve-v1' });
+
+  assert(!changed, 'unchanged geometry should return false');
+  eq(g.config.cols, 8);
+  deepEq(events, [{ type: 'reflow', tileIds: [] }]);
+});
+
+test('Grid.updateConfig remains side-effect-free when columns change', () => {
+  const g = new Grid(
+    { cols: 12, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [{ id: 'right', col: 8, row: 3, w: 4, h: 2 }],
+  );
+  const before = geometry(g.tiles);
+  const events = [];
+  g.changes.on((event) => events.push(event));
+
+  g.updateConfig({ cols: 4 });
+
+  deepEq(geometry(g.tiles), before);
+  deepEq(events, [{ type: 'config', tileIds: [] }]);
+});
+
+test('Grid.reflow rejects invalid options without partially mutating state', () => {
+  const g = new Grid(
+    { cols: 12, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [{ id: 'a', col: 8, row: 3, w: 4, h: 2 }],
+  );
+  const before = g.toJSON();
+  const events = [];
+  g.changes.on((event) => events.push(event));
+  const invalidOptions = [
+    { cols: 0, strategy: 'preserve-v1' },
+    { cols: -1, strategy: 'preserve-v1' },
+    { cols: 2.5, strategy: 'preserve-v1' },
+    { cols: Infinity, strategy: 'preserve-v1' },
+    { cols: NaN, strategy: 'preserve-v1' },
+    { cols: 4, strategy: 'unknown-v1' },
+  ];
+
+  for (const options of invalidOptions) {
+    let threw = false;
+    try {
+      g.reflow(options);
+    } catch {
+      threw = true;
+    }
+    assert(threw, 'invalid Grid.reflow call must throw');
+    deepEq(g.toJSON(), before, 'failed reflow must roll back config and tiles');
+  }
+  deepEq(events, []);
+});
+
+test('Grid.reflow leaves out-of-flow tiles untouched and out of collision checks', () => {
+  const pinned = {
+    id: 'pinned', col: 9, row: 9, w: 2, h: 2,
+    position: 'absolute', pinned: { x: 100, y: 200 },
+  };
+  const g = new Grid(
+    { cols: 12, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [
+      pinned,
+      { id: 'flow', col: 8, row: 0, w: 4, h: 2 },
+    ],
+  );
+
+  g.reflow({
+    cols: 4,
+    strategy: 'preserve-v1',
+    placements: {
+      pinned: { col: 0, row: 0, w: 4, h: 4 },
+    },
+  });
+
+  deepEq(g.getTile('pinned'), pinned);
+  deepEq(geometry([g.getTile('flow')]), [
+    { id: 'flow', col: 0, row: 0, w: 4, h: 2 },
+  ]);
+});
+
+test('Grid.reflow converts an infinite horizontal grid to finite columns', () => {
+  const g = new Grid(
+    { cols: Infinity, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [{ id: 'a', col: 20, row: 0, w: 2, h: 2 }],
+  );
+
+  g.reflow({ cols: 8, strategy: 'preserve-v1' });
+
+  eq(g.config.cols, 8);
+  eq(g.config.infiniteX, false);
+  deepEq(geometry(g.tiles), [{ id: 'a', col: 0, row: 0, w: 2, h: 2 }]);
+});
+
+test('Reflow keeps all ordinary tiles renderable after shrinking to 8 and 4 columns', () => {
+  const input = [
+    { id: 'hero', col: 0, row: 0, w: 8, h: 4 },
+    { id: 'side', col: 8, row: 0, w: 4, h: 4 },
+    { id: 'wide', col: 0, row: 6, w: 12, h: 5 },
+    { id: 'small', col: 10, row: 12, w: 2, h: 2 },
+  ];
+
+  for (const cols of [8, 4]) {
+    const result = reflowTiles(input, { cols, strategy: 'preserve-v1' });
+    for (const tile of result) {
+      assert(tile.col >= 0 && tile.col + tile.w <= cols, `${tile.id} must fit ${cols} columns`);
+    }
+    for (let i = 0; i < result.length; i++) {
+      for (let j = i + 1; j < result.length; j++) {
+        assert(!rectsOverlap(result[i], result[j]), `${result[i].id} and ${result[j].id} overlap`);
+      }
+    }
+  }
+});
+
+test('Grid.reflow does not apply gravity automatically', () => {
+  const g = new Grid(
+    { cols: 4, rows: Infinity, unitWidth: 50, unitHeight: 50, gravity: 'top' },
+    [{ id: 'a', col: 0, row: 5, w: 2, h: 2 }],
+  );
+  const events = [];
+  g.changes.on((event) => events.push(event));
+
+  g.reflow({ cols: 4, strategy: 'preserve-v1' });
+
+  eq(g.getTile('a').row, 5);
+  deepEq(events, [{ type: 'reflow', tileIds: [] }]);
+  g.compactAll();
+  eq(g.getTile('a').row, 0);
+  eq(events[1].type, 'compact');
+});
+
+test('Grid.pack remains a separate dense operation after reflow', () => {
+  const g = new Grid(
+    { cols: 4, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [
+      { id: 'a', col: 0, row: 5, w: 2, h: 2 },
+      { id: 'b', col: 2, row: 5, w: 2, h: 2 },
+    ],
+  );
+
+  g.reflow({ cols: 4, strategy: 'preserve-v1' });
+  eq(g.getTile('a').row, 5, 'reflow must preserve the valid gap');
+  assert(g.pack(), 'pack should still translate the dense block');
+  deepEq(geometry(g.tiles), [
+    { id: 'a', col: 0, row: 0, w: 2, h: 2 },
+    { id: 'b', col: 2, row: 0, w: 2, h: 2 },
+  ]);
 });
 
 test('rectInBounds respects fixed and infinite axes', () => {

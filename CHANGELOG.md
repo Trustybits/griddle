@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.5 - 2026-07-15
+
+### Added
+
+- Explicit, breakpoint-agnostic reflow through `reflowTiles()` and
+  `Grid.reflow()` in `@griddle/core`.
+- The immutable `preserve-v1` strategy, including optional generic
+  pre-positioned geometry through `placements`.
+- A shared `api.reflow()` method in the React, Vue, and Svelte adapters.
+- Reflow API documentation and finite-column demo controls that keep tiles
+  renderable when the grid width shrinks.
+
+### Changed
+
+- React adapter revisions now advance monotonically for every completed core
+  change, including geometry-only changes.
+- Adapter test suites now verify that a completed reflow refreshes tiles,
+  config, and version exactly once.
+
+### Compatibility
+
+- `@griddle/react`, `@griddle/vue`, and `@griddle/svelte` 0.1.5 require
+  `@griddle/core` 0.1.5 or newer within the 0.1 release line.
+
 ## 0.1.4 - 2026-07-14
 
 ### Fixed

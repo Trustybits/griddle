@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Grid } from '@griddle/core';
-import type { GridConfig, Tile, GridSnapshot } from '@griddle/core';
+import type { GridConfig, GridSnapshot, ReflowOptions, Tile } from '@griddle/core';
 
 export interface UseGriddleInit {
   config: GridConfig;
@@ -17,6 +17,7 @@ export interface GriddleApi {
   resizeTile: (id: string, size: { w: number; h: number }) => boolean;
   addTile: (tile: Tile) => void;
   removeTile: (id: string) => void;
+  reflow: (options: ReflowOptions) => boolean;
   updateConfig: (patch: Partial<GridConfig>) => void;
   toJSON: () => GridSnapshot;
   loadJSON: (snap: GridSnapshot) => void;
@@ -24,19 +25,33 @@ export interface GriddleApi {
   readonly version: number;
 }
 
+/** @internal Reactive revision source used by the React adapter. */
+export function createGridRevisionStore(grid: Grid) {
+  let revision = 0;
+  return {
+    subscribe(onStoreChange: () => void): () => void {
+      return grid.changes.on(() => {
+        revision += 1;
+        onStoreChange();
+      });
+    },
+    getSnapshot(): number {
+      return revision;
+    },
+  };
+}
+
 export function useGriddle(init: UseGriddleInit | (() => UseGriddleInit)): GriddleApi {
   const [grid] = useState(() => {
     const i = typeof init === 'function' ? init() : init;
     return new Grid(i.config, i.tiles ?? []);
   });
+  const [revisionStore] = useState(() => createGridRevisionStore(grid));
 
   const version = useSyncExternalStore(
-    (cb) => {
-      const off = grid.changes.on(() => cb());
-      return off;
-    },
-    () => grid.tiles.length + '|' + JSON.stringify(grid.config),
-    () => grid.tiles.length + '|' + JSON.stringify(grid.config),
+    revisionStore.subscribe,
+    revisionStore.getSnapshot,
+    revisionStore.getSnapshot,
   );
 
   // Stable API object
@@ -49,6 +64,7 @@ export function useGriddle(init: UseGriddleInit | (() => UseGriddleInit)): Gridd
       resizeTile: (id, size) => grid.resizeTile(id, size),
       addTile: (t) => grid.addTile(t),
       removeTile: (id) => grid.removeTile(id),
+      reflow: (options) => grid.reflow(options),
       updateConfig: (patch) => grid.updateConfig(patch),
       toJSON: () => grid.toJSON(),
       loadJSON: (snap) => grid.loadJSON(snap),
@@ -57,7 +73,7 @@ export function useGriddle(init: UseGriddleInit | (() => UseGriddleInit)): Gridd
   }, [grid]);
 
   // version bump for consumers that prefer plain re-renders
-  (api as { version: number }).version = typeof version === 'string' ? version.length : version;
+  (api as { version: number }).version = version;
 
   return api;
 }

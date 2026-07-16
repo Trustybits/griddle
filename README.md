@@ -20,6 +20,8 @@ Griddle separates **logic** (placement, movement, swap/push, compaction, seriali
 - **Tile**: an object placed at `(col, row)` with a footprint of `w × h` units.
 - **Repack**: after a drag, tiles resolve collisions via Rules 1–6 (see `docs/movement.md`).
 - **Compaction** (gravity): optional backfilling of gaps toward a chosen edge.
+- **Reflow**: explicit adaptation to a finite column count while preserving
+  valid positions and gaps (see `docs/reflow.md`).
 - **Loop**: optional infinite-gallery mode — the packed content repeats endlessly in both axes with drag-to-pan physics and wheel panning, no scrollbars (see `docs/loop.md`).
 
 ## Quickstart (React)
@@ -81,6 +83,19 @@ const json = grid.toJSON();
 ```
 
 See `docs/movement.md` for the full movement ruleset.
+
+## Explicit reflow
+
+Changing `cols` with `updateConfig()` never relocates tiles. Use the versioned
+reflow operation when a finite-width change should also adapt geometry:
+
+```ts
+grid.reflow({ cols: 4, strategy: 'preserve-v1' });
+```
+
+Griddle does not know about breakpoints; callers choose the target columns and
+may provide generic pre-positioned geometry through `placements`. Reflow is
+separate from dense `pack()` and gravity. See `docs/reflow.md`.
 
 ## Animation configuration
 

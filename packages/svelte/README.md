@@ -38,6 +38,18 @@ shown above). `svelte` (^4 or ^5) is expected to already be in your app.
 </GriddleGrid>
 ```
 
+## Explicit reflow
+
+Changing `cols` through `updateConfig()` does not relocate tiles. Use the
+versioned reflow operation when a finite-column change should adapt geometry:
+
+```js
+api.reflow({ cols: 4, strategy: 'preserve-v1' });
+```
+
+Griddle has no breakpoint model, and reflow remains separate from `pack()` and
+gravity. See the [reflow guide](https://github.com/Trustybits/griddle/blob/master/docs/reflow.md).
+
 ## Animation configuration
 
 Tile repositioning and lift animations share `config.animation` with the other

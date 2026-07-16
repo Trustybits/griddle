@@ -4,7 +4,7 @@
     <p style="margin:0 0 20px;color:#7a8397;font-size:12px">Vue demo</p>
 
     <div :style="heading">Grid</div>
-    <div :style="row"><span :style="label">Columns</span>
+    <div :style="row"><span :style="label">Columns (reflow)</span>
       <input :style="inputStyle" type="number" min="1" :value="cfg.cols === Infinity ? '' : cfg.cols"
         :placeholder="cfg.cols === Infinity ? '∞' : ''"
         @input="(e) => setCols((e.target as HTMLInputElement).value)"/>
@@ -222,8 +222,15 @@ function toggleHandle(c: Corner) {
   props.api.updateConfig({ resizeHandles: Array.from(next) });
 }
 function setCols(v: string) {
-  const n = v === '' ? Infinity : Math.max(1, parseInt(v, 10));
-  props.api.updateConfig({ cols: n, infiniteX: n === Infinity });
+  if (v === '') {
+    props.api.updateConfig({ cols: Infinity, infiniteX: true });
+    return;
+  }
+  const parsed = parseInt(v, 10);
+  props.api.reflow({
+    cols: Number.isFinite(parsed) ? Math.max(1, parsed) : 1,
+    strategy: 'preserve-v1',
+  });
 }
 function setRows(v: string) {
   const n = v === '' ? Infinity : Math.max(1, parseInt(v, 10));
