@@ -355,6 +355,16 @@ test('addTile rejects illegal geometry without mutating the grid', () => {
   deepEq(g.tiles.map((tile) => tile.id), ['a']);
 });
 
+test('addTile trims a new tile footprint at finite grid edges', () => {
+  const g = new Grid({ cols: 4, rows: 4, unitWidth: 50, unitHeight: 50 });
+
+  g.addTile({ id: 'trimmed', col: 2, row: 3, w: 5, h: 5 });
+
+  deepEq(geometry(g.tiles), [
+    { id: 'trimmed', col: 2, row: 3, w: 2, h: 1 },
+  ]);
+});
+
 test('addTileWithDisplacement remains the explicit collision-resolving add path', () => {
   const g = new Grid(
     { cols: 4, rows: Infinity, unitWidth: 50, unitHeight: 50 },
@@ -365,6 +375,22 @@ test('addTileWithDisplacement remains the explicit collision-resolving add path'
   const [a, b] = g.tiles;
   assert(!rectsOverlap(a, b), 'displacement add must finish without overlap');
   assert(g.tiles.every((tile) => tile.col >= 0 && tile.col + tile.w <= 4));
+});
+
+test('addTileWithDisplacement trims before resolving collisions', () => {
+  const g = new Grid(
+    { cols: 4, rows: Infinity, unitWidth: 50, unitHeight: 50 },
+    [{ id: 'existing', col: 3, row: 1, w: 1, h: 1 }],
+  );
+
+  assert(g.addTileWithDisplacement({
+    id: 'created', col: 3, row: 0, w: 4, h: 2,
+  }));
+
+  const created = g.getTile('created');
+  eq(created.w, 1, 'created tile should stop at the right edge');
+  assert(g.tiles.every((tile) => tile.col >= 0 && tile.col + tile.w <= 4));
+  assert(!rectsOverlap(g.getTile('created'), g.getTile('existing')));
 });
 
 // ---- Explicit reflow --------------------------------------------------
@@ -1063,6 +1089,18 @@ test('resizeTile grows and displaces neighbors', () => {
   eq(g.getTile('a').w, 2);
   const b = g.getTile('b');
   assert(!(b.col === 1 && b.row === 0));
+});
+
+test('resizeTile trims requested growth at finite right and bottom edges', () => {
+  const g = new Grid({ cols: 6, rows: 5, unitWidth: 50, unitHeight: 50 });
+  g.addTile({ id: 'edge', col: 4, row: 3, w: 1, h: 1 });
+
+  const ok = g.resizeTile('edge', { w: 20, h: 20 });
+
+  assert(ok, 'bounded resize should commit its largest legal footprint');
+  deepEq(geometry(g.tiles), [
+    { id: 'edge', col: 4, row: 3, w: 2, h: 2 },
+  ]);
 });
 
 test('resizeTile cascades a vertical stack instead of jumping the first victim', () => {

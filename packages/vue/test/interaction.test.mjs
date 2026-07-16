@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  clampInteractionCell,
   measureInteractionScale,
+  resolveResizePreview,
   toLocalInteractionDelta,
 } from '../dist/interaction.js';
 
@@ -70,4 +72,50 @@ test('missing measurement data safely falls back to unscaled coordinates', () =>
     offsetWidth: 0,
     offsetHeight: 0,
   })), { x: 1, y: 1 });
+});
+
+test('south-east resize trims at finite right and bottom edges', () => {
+  assert.deepEqual(resolveResizePreview({
+    corner: 'se',
+    startCol: 2,
+    startRow: 1,
+    startW: 1,
+    startH: 1,
+    stepsX: 20,
+    stepsY: 20,
+    minW: 1,
+    minH: 1,
+    maxW: Infinity,
+    maxH: Infinity,
+    cols: 4,
+    rows: 3,
+    infiniteX: false,
+    infiniteY: false,
+  }), { col: 2, row: 1, w: 2, h: 2 });
+});
+
+test('north-west resize trims at zero while preserving opposite edges', () => {
+  assert.deepEqual(resolveResizePreview({
+    corner: 'nw',
+    startCol: 2,
+    startRow: 2,
+    startW: 2,
+    startH: 2,
+    stepsX: -20,
+    stepsY: -20,
+    minW: 1,
+    minH: 1,
+    maxW: Infinity,
+    maxH: Infinity,
+    cols: 6,
+    rows: 6,
+    infiniteX: false,
+    infiniteY: false,
+  }), { col: 0, row: 0, w: 4, h: 4 });
+});
+
+test('draw cells clamp to the final finite cell but remain open on infinite axes', () => {
+  assert.equal(clampInteractionCell(9, 4, false), 3);
+  assert.equal(clampInteractionCell(-2, 4, false), 0);
+  assert.equal(clampInteractionCell(9, 4, true), 9);
 });

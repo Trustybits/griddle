@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.1.8 - 2026-07-16
+
+### Fixed
+
+- Core add and resize operations now trim footprints at finite grid edges
+  instead of rejecting an otherwise valid creation or resize.
+- Vue draw-to-create and corner-resize previews stop at the last legal grid
+  cell, preserving the opposite resize edge rather than snapping back.
+
+### Tests
+
+- Added regressions for finite-edge tile creation and resizing, including
+  south-east and north-west Vue resize gestures.
+
+### Compatibility
+
+- `@griddle/react`, `@griddle/vue`, and `@griddle/svelte` 0.1.8 require
+  `@griddle/core` 0.1.8 or newer within the 0.1 release line.
+
 ## 0.1.7 - 2026-07-16
 
 ### Fixed

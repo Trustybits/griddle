@@ -114,6 +114,8 @@ import type { GriddleApi } from './useGriddle.js';
 import { animateReposition, liftTransition } from './animation.js';
 import {
   measureInteractionScale,
+  clampInteractionCell,
+  resolveResizePreview,
   toLocalInteractionDelta,
   type InteractionScale,
 } from './interaction.js';
@@ -406,11 +408,20 @@ function onBackgroundPointerDown(e: PointerEvent) {
 
   const el = scrollEl.value;
   if (!el) return;
+  interactionScale = measureInteractionScale(el);
   const rect = el.getBoundingClientRect();
-  const x = e.clientX - rect.left + el.scrollLeft;
-  const y = e.clientY - rect.top + el.scrollTop;
-  const col = Math.floor(x / colSize.value);
-  const row = Math.floor(y / rowSize.value);
+  const x = (e.clientX - rect.left) / interactionScale.x + el.scrollLeft;
+  const y = (e.clientY - rect.top) / interactionScale.y + el.scrollTop;
+  const col = clampInteractionCell(
+    Math.floor(x / colSize.value),
+    config.value.cols,
+    config.value.infiniteX ?? config.value.cols === Infinity,
+  );
+  const row = clampInteractionCell(
+    Math.floor(y / rowSize.value),
+    config.value.rows,
+    config.value.infiniteY ?? config.value.rows === Infinity,
+  );
   drawState.value = { anchorCol: col, anchorRow: row, currentCol: col, currentRow: row };
   (el as HTMLDivElement).setPointerCapture(e.pointerId);
 }
@@ -442,10 +453,18 @@ function onPointerMove(e: PointerEvent) {
     const el = scrollEl.value;
     if (el) {
       const rect = el.getBoundingClientRect();
-      const x = e.clientX - rect.left + el.scrollLeft;
-      const y = e.clientY - rect.top + el.scrollTop;
-      const col = Math.max(0, Math.floor(x / colSize.value));
-      const row = Math.max(0, Math.floor(y / rowSize.value));
+      const x = (e.clientX - rect.left) / interactionScale.x + el.scrollLeft;
+      const y = (e.clientY - rect.top) / interactionScale.y + el.scrollTop;
+      const col = clampInteractionCell(
+        Math.floor(x / colSize.value),
+        config.value.cols,
+        config.value.infiniteX ?? config.value.cols === Infinity,
+      );
+      const row = clampInteractionCell(
+        Math.floor(y / rowSize.value),
+        config.value.rows,
+        config.value.infiniteY ?? config.value.rows === Infinity,
+      );
       drawState.value = { ...drawState.value, currentCol: col, currentRow: row };
     }
     return;
@@ -523,22 +542,30 @@ function onPointerMove(e: PointerEvent) {
       e.clientY - r.startPointerY,
       interactionScale,
     );
-    let dw = 0, dh = 0, dcol = 0, drow = 0;
     const stepsX = Math.round(dx / colSize.value);
     const stepsY = Math.round(dy / rowSize.value);
-    if (r.corner === 'se' || r.corner === 'ne') dw = stepsX;
-    if (r.corner === 'se' || r.corner === 'sw') dh = stepsY;
-    if (r.corner === 'sw' || r.corner === 'nw') { dw = -stepsX; dcol = stepsX; }
-    if (r.corner === 'ne' || r.corner === 'nw') { dh = -stepsY; drow = stepsY; }
     const tile = props.api.grid.getTile(r.tileId);
-    const minW = tile?.minW ?? 1;
-    const minH = tile?.minH ?? 1;
-    const maxW = tile?.maxW ?? Infinity;
-    const maxH = tile?.maxH ?? Infinity;
-    const nW = Math.min(maxW, Math.max(minW, r.startW + dw));
-    const nH = Math.min(maxH, Math.max(minH, r.startH + dh));
-    const nC = r.startCol + dcol;
-    const nR = r.startRow + drow;
+    const preview = resolveResizePreview({
+      corner: r.corner,
+      startCol: r.startCol,
+      startRow: r.startRow,
+      startW: r.startW,
+      startH: r.startH,
+      stepsX,
+      stepsY,
+      minW: tile?.minW ?? 1,
+      minH: tile?.minH ?? 1,
+      maxW: tile?.maxW ?? Infinity,
+      maxH: tile?.maxH ?? Infinity,
+      cols: config.value.cols,
+      rows: config.value.rows,
+      infiniteX: config.value.infiniteX ?? config.value.cols === Infinity,
+      infiniteY: config.value.infiniteY ?? config.value.rows === Infinity,
+    });
+    const nW = preview.w;
+    const nH = preview.h;
+    const nC = preview.col;
+    const nR = preview.row;
     if (nW !== r.previewW || nH !== r.previewH || nC !== r.previewCol || nR !== r.previewRow) {
       resize.value = { ...r, previewW: nW, previewH: nH, previewCol: nC, previewRow: nR };
     }

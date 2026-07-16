@@ -60,6 +60,27 @@ function rectInConfigBounds(config: GridConfig, rect: CellRect): boolean {
   return !config.infiniteY || rect.row >= 0;
 }
 
+/**
+ * Trim an in-flow tile's footprint at the grid's positive edges while keeping
+ * its origin fixed. Invalid origins remain invalid so callers still reject a
+ * tile that starts outside the grid rather than silently moving it.
+ */
+function trimTileToConfigBounds(config: GridConfig, tile: Tile): Tile {
+  if (!isInFlow(tile)) return tile;
+
+  let w = tile.w;
+  let h = tile.h;
+  if (!config.infiniteX && Number.isInteger(tile.col)) {
+    const available = config.cols - tile.col;
+    if (available >= 1) w = Math.min(w, available);
+  }
+  if (!config.infiniteY && Number.isInteger(tile.row)) {
+    const available = config.rows - tile.row;
+    if (available >= 1) h = Math.min(h, available);
+  }
+  return w === tile.w && h === tile.h ? tile : { ...tile, w, h };
+}
+
 function assertValidLayout(config: GridConfig, tiles: readonly Tile[]): void {
   const ids = new Set<string>();
   const placed: Tile[] = [];
@@ -239,7 +260,7 @@ export class Grid {
     if (this.tilesById.has(tile.id)) {
       throw new Error(`Griddle: duplicate tile id "${tile.id}"`);
     }
-    const next = { ...tile };
+    const next = trimTileToConfigBounds(this.config, { ...tile });
     assertValidLayout(this.config, [...this.tiles, next]);
     this.tilesById.set(tile.id, next);
     this.changes.emit({ type: 'add', tileIds: [tile.id] });
@@ -251,27 +272,29 @@ export class Grid {
 
   /**
    * Add a tile, displacing any overlapping tiles using the same push logic as
-   * `resizeTile`. Returns false (and leaves the grid unchanged) if the rect is
+   * `resizeTile`. A footprint that crosses a finite positive edge is trimmed
+   * in place. Returns false (and leaves the grid unchanged) if the origin is
    * out of bounds or any victim cannot be placed.
    */
   addTileWithDisplacement(tile: Tile): boolean {
     if (this.tilesById.has(tile.id)) {
       throw new Error(`Griddle: duplicate tile id "${tile.id}"`);
     }
-    assertPositiveInteger(tile.w, `tile "${tile.id}" width`);
-    assertPositiveInteger(tile.h, `tile "${tile.id}" height`);
-    if (!isInFlow(tile)) {
-      this.addTile(tile);
+    const next = trimTileToConfigBounds(this.config, { ...tile });
+    assertPositiveInteger(next.w, `tile "${next.id}" width`);
+    assertPositiveInteger(next.h, `tile "${next.id}" height`);
+    if (!isInFlow(next)) {
+      this.addTile(next);
       return true;
     }
-    if (!Number.isInteger(tile.col) || !Number.isInteger(tile.row)) return false;
-    const newRect: CellRect = { col: tile.col, row: tile.row, w: tile.w, h: tile.h };
+    if (!Number.isInteger(next.col) || !Number.isInteger(next.row)) return false;
+    const newRect: CellRect = { col: next.col, row: next.row, w: next.w, h: next.h };
     if (!this.rectInBounds(newRect)) return false;
 
     const snapshot = this.snapshotTiles();
-    this.tilesById.set(tile.id, { ...tile });
+    this.tilesById.set(next.id, next);
 
-    const overlapping = this.tilesIn(newRect, new Set([tile.id]));
+    const overlapping = this.tilesIn(newRect, new Set([next.id]));
     for (const victim of overlapping) {
       const pDirs = priorityDirections(newRect, tileRect(victim));
       const steps = pDirs.map(directionStep);
@@ -284,7 +307,7 @@ export class Grid {
           cursor = { col: cursor.col + step.dx, row: cursor.row + step.dy };
           const rect: CellRect = { col: cursor.col, row: cursor.row, w: victim.w, h: victim.h };
           if (!this.rectInBounds(rect)) break;
-          const blocked = this.tilesIn(rect, new Set([victim.id, tile.id]));
+          const blocked = this.tilesIn(rect, new Set([victim.id, next.id]));
           if (blocked.length === 0 && !rectsOverlap(rect, newRect)) {
             this._setTilePos(victim.id, cursor);
             placed = true;
@@ -294,7 +317,7 @@ export class Grid {
       }
 
       if (!placed) {
-        const fallback = findNearestFreeCell(this, victim, newRect, tile.id);
+        const fallback = findNearestFreeCell(this, victim, newRect, next.id);
         if (fallback) {
           this._setTilePos(victim.id, fallback);
           placed = true;
@@ -314,7 +337,7 @@ export class Grid {
       return false;
     }
 
-    this.changes.emit({ type: 'add', tileIds: [tile.id] });
+    this.changes.emit({ type: 'add', tileIds: [next.id] });
     if (this.config.gravity && this.config.gravity !== 'none') this.compactAll();
     this._structuralRepack();
     return true;
@@ -533,9 +556,23 @@ export class Grid {
   resizeTile(id: string, size: Footprint): boolean {
     const tile = this.tilesById.get(id);
     if (!tile) return false;
+    const requestedW = Math.max(
+      tile.minW ?? 1,
+      Math.min(tile.maxW ?? 1_000_000, Math.floor(size.w)),
+    );
+    const requestedH = Math.max(
+      tile.minH ?? 1,
+      Math.min(tile.maxH ?? 1_000_000, Math.floor(size.h)),
+    );
+    const availableW = this.config.infiniteX
+      ? requestedW
+      : Math.max(1, this.config.cols - tile.col);
+    const availableH = this.config.infiniteY
+      ? requestedH
+      : Math.max(1, this.config.rows - tile.row);
     const clamped: Footprint = {
-      w: Math.max(tile.minW ?? 1, Math.min(tile.maxW ?? 1_000_000, Math.floor(size.w))),
-      h: Math.max(tile.minH ?? 1, Math.min(tile.maxH ?? 1_000_000, Math.floor(size.h))),
+      w: Math.min(requestedW, availableW),
+      h: Math.min(requestedH, availableH),
     };
     if (clamped.w === tile.w && clamped.h === tile.h) return true;
     const newRect: CellRect = {
