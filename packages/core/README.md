@@ -28,6 +28,18 @@ const json = grid.toJSON(); // serialize
 grid.loadJSON(json);        // restore
 ```
 
+## Layout invariant
+
+Ordinary in-flow tiles must always use positive integer footprints, remain
+fully inside the configured grid, and never overlap. The constructor,
+`addTile()`, `updateConfig()`, `reflow()`, and `loadJSON()` reject illegal
+geometry without partially mutating the grid. Use
+`addTileWithDisplacement()` when adding at an occupied position and you want
+Griddle to move neighboring tiles into legal slots.
+
+`absolute` and `fixed` tiles are intentionally out of flow, so they remain
+exempt from grid-cell collision and containment checks.
+
 ## Adapter animation configuration
 
 Core stores and normalizes the animation settings shared by the React, Vue,
