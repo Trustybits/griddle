@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.1.7 - 2026-07-16
+
+### Fixed
+
+- Vue pointer deltas are now converted from viewport coordinates into the
+  grid's local coordinate space, keeping single-tile, group, pinned, and resize
+  gestures aligned when a host applies CSS scaling.
+- Scaled `lg` layouts now resolve the same candidate cells as their visual tile
+  positions instead of lagging behind the pointer.
+
+### Tests
+
+- Added regressions for transformed interaction coordinates and for dropping a
+  smaller tile into the center of a larger tile without overlap or overflow.
+
+### Compatibility
+
+- `@griddle/react`, `@griddle/vue`, and `@griddle/svelte` 0.1.7 require
+  `@griddle/core` 0.1.7 or newer within the 0.1 release line.
+
 ## 0.1.6 - 2026-07-16
 
 ### Changed

@@ -1,6 +1,6 @@
 {
   "name": "@griddle/vue",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Vue 3 bindings for Griddle — a headless, zero-dependency grid/canvas engine.",
   "keywords": [
     "grid",
@@ -53,11 +53,11 @@
   },
   "peerDependencies": {
     "vue": "^3.3.0",
-    "@griddle/core": "^0.1.6"
+    "@griddle/core": "^0.1.7"
   },
   "devDependencies": {
     "vue": "^3.4.0",
-    "@griddle/core": "^0.1.6",
+    "@griddle/core": "^0.1.7",
     "vite": "^5.4.0",
     "@vitejs/plugin-vue": "^5.2.0",
     "vue-tsc": "^2.2.0"
