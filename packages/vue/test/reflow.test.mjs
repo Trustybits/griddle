@@ -14,7 +14,7 @@ test('Vue API refreshes tiles, config, and version once after reflow', () => {
     tiles: [{ id: 'tile', col: 8, row: 0, w: 4, h: 2 }],
   }));
 
-  const changed = api.reflow({ cols: 4, strategy: 'preserve-v1' });
+  const changed = api.reflow({ cols: 4, strategy: 'griddle-v1' });
 
   assert.equal(changed, true);
   assert.equal(api.version.value, 1);
@@ -24,6 +24,6 @@ test('Vue API refreshes tiles, config, and version once after reflow', () => {
   ]);
 
   scope.stop();
-  api.grid.reflow({ cols: 8, strategy: 'preserve-v1' });
+  api.grid.reflow({ cols: 8, strategy: 'griddle-v1' });
   assert.equal(api.version.value, 1, 'scope disposal must remove the listener');
 });

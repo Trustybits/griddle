@@ -18,7 +18,7 @@ test('Svelte API refreshes each store once after reflow', () => {
   const offConfig = api.config.subscribe((value) => configValues.push(value));
   const offVersion = api.version.subscribe((value) => versionValues.push(value));
 
-  const changed = api.reflow({ cols: 4, strategy: 'preserve-v1' });
+  const changed = api.reflow({ cols: 4, strategy: 'griddle-v1' });
 
   assert.equal(changed, true);
   assert.equal(tileValues.length, 2);
@@ -30,7 +30,7 @@ test('Svelte API refreshes each store once after reflow', () => {
   assert.equal(configValues.at(-1).cols, 4);
 
   api.destroy();
-  api.grid.reflow({ cols: 8, strategy: 'preserve-v1' });
+  api.grid.reflow({ cols: 8, strategy: 'griddle-v1' });
   assert.equal(tileValues.length, 2, 'destroy must remove the listener');
   assert.equal(configValues.length, 2, 'destroy must remove the listener');
   assert.deepEqual(versionValues, [0, 1]);

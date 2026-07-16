@@ -28,35 +28,38 @@ api.reflow({ cols: 4, strategy: 'griddle-v1' });
 
 - Griddle has no breakpoint model. The caller chooses when to reflow and which
   finite column count to target.
-- Strategy identifiers are immutable algorithm contracts.
-- `griddle-v1` discards source gaps and positions for automatic tiles, trims
-  widths at the finite edge without changing height (the same footprint rule
-  used by finite creation and resizing), and runs Griddle's dense exact/greedy
-  packer.
-- `preserve-v1` remains available as a compatibility strategy. It keeps valid
-  positions and gaps, resolves collisions and horizontal overflow, and
+- `griddle-v1` is the sole immutable reflow strategy. It keeps valid positions
+  and gaps, resolves collisions and horizontal overflow deterministically, and
   proportionally scales tiles that are wider than the target.
+- Automatic tiles are considered by row, then column, then stable tile ID. A
+  legal, non-overlapping position is retained. A tile that must move scans
+  left-to-right and then downward for the first free position, beginning at its
+  current row when its horizontal geometry fits and at row 0 otherwise.
+- A tile wider than the target is scaled to the target width. Its height is
+  multiplied by `targetWidth / originalWidth`, rounded with `Math.round()`, and
+  clamped to at least one row.
 - `placements` is a generic map of pre-positioned geometry. It does not imply
-  breakpoints or persistence. Under `griddle-v1`, matching placements are
-  immutable anchors: their position and size are installed exactly, while
-  automatic tiles are densely packed around them. Anchors must be in bounds and
-  mutually non-overlapping; illegal placement maps throw before mutation.
+  breakpoints or persistence. Matching placements are authoritative: their
+  position and size are installed exactly, while missing tiles scan for the
+  first free position from row 0 in input order. Unknown placement IDs do not
+  create tiles. Anchors must be in bounds and mutually non-overlapping; illegal
+  placement maps throw before mutation.
 - The pure helper returns new tile objects and preserves consumer data and tile
   capabilities. `Grid.reflow()` operates only on in-flow tiles and leaves
   absolute and fixed tiles untouched.
 - `Grid.reflow()` installs columns and geometry before emitting one `reflow`
   event. Its return value reports whether tile geometry changed.
 
-## Why reflow uses packing rather than movement
+## Why reflow is separate from movement
 
 Movement and collision displacement have a user gesture origin and target;
 creation similarly privileges the newly created tile. A breakpoint change has
 neither signal, so applying directional push rules would make the result depend
-on an invented direction or insertion order. `griddle-v1` therefore reuses the
-gesture-independent part of Griddle's behavior: finite-edge footprint trimming
-and deterministic dense packing.
+on an invented direction. `griddle-v1` instead follows a deterministic
+projection contract that preserves legal source geometry and relocates only
+tiles that cannot remain where they are.
 
-When placements are supplied, packing treats them as occupied, immovable cells.
+When placements are supplied, reflow treats them as occupied, immovable cells.
 Callers that promise authoritative placements must not run gravity afterward,
 because gravity is intentionally allowed to move tiles.
 
@@ -70,5 +73,6 @@ These are separate operations with different intent:
   gaps.
 - Gravity (`compactAll()`) pulls tiles toward the configured gravity target.
 
-Reflow does not apply gravity automatically. `griddle-v1` incorporates packing;
-`preserve-v1` keeps packing as a separate caller choice.
+Reflow does not apply packing or gravity automatically. Callers opt into those
+separate operations only when they intentionally want to remove gaps or apply a
+gravity policy.

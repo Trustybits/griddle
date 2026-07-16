@@ -26,7 +26,7 @@ test('React revision store refreshes once after final reflow state is installed'
 
   grid.reflow({
     cols: 4,
-    strategy: 'preserve-v1',
+    strategy: 'griddle-v1',
     placements: { tile: { col: 2, row: 1, w: 2, h: 2 } },
   });
 

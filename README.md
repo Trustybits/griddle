@@ -95,8 +95,10 @@ grid.reflow({ cols: 4, strategy: 'griddle-v1' });
 
 Griddle does not know about breakpoints; callers choose the target columns and
 may provide generic pre-positioned geometry through `placements`. The
-`griddle-v1` strategy densely packs automatic tiles while treating supplied
-placements as immovable anchors. See `docs/reflow.md`.
+`griddle-v1` strategy preserves valid positions and gaps, proportionally scales
+tiles that are wider than the target, resolves collisions and horizontal
+overflow deterministically, and treats supplied placements as authoritative
+geometry. See `docs/reflow.md`.
 
 ## Animation configuration
 

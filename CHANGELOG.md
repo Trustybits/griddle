@@ -6,15 +6,18 @@
 
 ### Added
 
-- Added the immutable `griddle-v1` reflow strategy. Automatic tiles use
-  Griddle's finite-edge width trimming and dense exact/greedy packing, while
-  valid caller placements remain exact, immovable anchors.
+- Added the sole immutable `griddle-v1` reflow strategy, matching the historical
+  Grids projection contract: valid positions and gaps are preserved, oversized
+  tiles scale proportionally, and collisions and horizontal overflow resolve
+  deterministically.
 
 ### Changed
 
 - React, Vue, and Svelte demos now exercise `griddle-v1` for finite-column
-  reflow. The compatibility-focused `preserve-v1` strategy remains supported
-  without behavior changes.
+  reflow.
+- Retired the bootstrap `preserve-v1` name and removed the experimental dense
+  responsive packing path. Ordinary `pack()` remains unchanged and separate
+  from reflow.
 
 ### Compatibility
 
