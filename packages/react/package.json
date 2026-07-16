@@ -1,6 +1,6 @@
 {
   "name": "@griddle/react",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "React bindings for Griddle — a headless, zero-dependency grid/canvas engine.",
   "keywords": [
     "grid",
@@ -53,12 +53,12 @@
   },
   "peerDependencies": {
     "react": ">=17",
-    "@griddle/core": "^0.1.9"
+    "@griddle/core": "^0.1.10"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
     "react": "^18.2.0",
     "typescript": "^5.4.0",
-    "@griddle/core": "^0.1.9"
+    "@griddle/core": "^0.1.10"
   }
 }

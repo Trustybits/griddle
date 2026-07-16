@@ -1,6 +1,6 @@
 {
   "name": "@griddle/core",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Headless grid/canvas engine. Zero runtime dependencies.",
   "keywords": [
     "grid",
